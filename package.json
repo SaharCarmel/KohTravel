@@ -1,0 +1,14 @@
+{
+  "name": "kohtravel",
+  "version": "1.0.0",
+  "description": "Travel planning and management web application",
+  "scripts": {
+    "dev": "concurrently \"cd frontend && npm run dev\" \"cd api && uv run --with fastapi --with uvicorn --with python-multipart uvicorn main:app --reload --port 8001\"",
+    "build": "cd frontend && npm run build",
+    "start": "cd frontend && npm start",
+    "deploy": "vercel --prod"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
