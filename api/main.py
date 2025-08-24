@@ -6,6 +6,8 @@ from alembic.config import Config
 import os
 import re
 
+from routes.documents import router as documents_router
+
 app = FastAPI(
     title="KohTravel API",
     description="Travel planning and management API",
@@ -55,6 +57,9 @@ async def startup_event():
             print(f"❌ Migration failed: {e}")
             # Don't crash the app, just log the error
             pass
+
+# Include routers
+app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
 
 @app.get("/")
 def read_root():

@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import SignInButton from "@/components/auth/SignInButton";
+import Link from "next/link";
 
 export default function Home() {
   return (
@@ -14,14 +15,26 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+          <Card>
+            <CardHeader>
+              <CardTitle>Document Management</CardTitle>
+              <CardDescription>Upload, view, search, and organize all your travel documents with AI-powered analysis</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Link href="/documents">
+                <Button className="w-full">Manage Documents</Button>
+              </Link>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Plan Your Journey</CardTitle>
               <CardDescription>Create detailed travel itineraries and discover amazing destinations</CardDescription>
             </CardHeader>
             <CardContent>
-              <Button className="w-full">Start Planning</Button>
+              <Button className="w-full" disabled>Start Planning</Button>
             </CardContent>
           </Card>
 
@@ -31,7 +44,7 @@ export default function Home() {
               <CardDescription>Keep track of your travel budget and expenses in real-time</CardDescription>
             </CardHeader>
             <CardContent>
-              <Button variant="outline" className="w-full">Manage Budget</Button>
+              <Button variant="outline" className="w-full" disabled>Manage Budget</Button>
             </CardContent>
           </Card>
         </div>

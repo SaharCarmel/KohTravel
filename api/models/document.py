@@ -27,6 +27,8 @@ class Document(Base):
     category_id = Column(Integer, ForeignKey("document_categories.id"), nullable=True, index=True)
     title = Column(String(255), nullable=False)
     original_filename = Column(String(255), nullable=True)
+    file_hash = Column(String(64), nullable=True, index=True)  # SHA-256 hash for duplicate detection
+    file_size = Column(Integer, nullable=True)  # File size in bytes
     raw_text = Column(Text, nullable=True)
     summary = Column(Text, nullable=True)
     structured_data = Column(JSON, nullable=True)
