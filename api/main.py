@@ -1,7 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from alembic import command
+from alembic.config import Config
 import os
+import re
+
+from routes.documents import router as documents_router
 
 app = FastAPI(
     title="KohTravel API",
@@ -39,6 +44,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup_event():
+    """Run database migrations on startup"""
+    if os.getenv("RUN_MIGRATIONS", "true") == "true":
+        try:
+            alembic_cfg = Config("alembic.ini")
+            command.upgrade(alembic_cfg, "head")
+            print("✅ Database migrations completed successfully")
+        except Exception as e:
+            print(f"❌ Migration failed: {e}")
+            # Don't crash the app, just log the error
+            pass
+
+# Include routers
+app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
 
 @app.get("/")
 def read_root():
