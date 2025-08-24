@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import SignInButton from "@/components/auth/SignInButton";
 
 export default function Home() {
   return (
@@ -8,6 +9,9 @@ export default function Home() {
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold mb-4">KohTravel</h1>
           <p className="text-muted-foreground text-lg">Your travel planning companion</p>
+          <div className="mt-6">
+            <SignInButton />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
