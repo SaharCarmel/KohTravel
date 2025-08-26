@@ -22,32 +22,6 @@ class ToolRequest(BaseModel):
     parameters: Dict[str, Any]
 
 
-async def get_user_uuid_from_email(email: str, db: Session) -> Optional[str]:
-    """Get user UUID from email, create user if doesn't exist"""
-    try:
-        # First try to find existing user by vercel_user_id (which might be email)
-        user = db.query(User).filter(
-            (User.email == email) | (User.vercel_user_id == email)
-        ).first()
-        
-        if user:
-            return str(user.id)
-        
-        # If user doesn't exist, create a minimal user record
-        new_user = User(
-            vercel_user_id=email,  # Use email as vercel_user_id for now
-            email=email
-        )
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
-        
-        logger.info("Created new user for agent", email=email, user_id=str(new_user.id))
-        return str(new_user.id)
-        
-    except Exception as e:
-        logger.error("Failed to get/create user", email=email, error=str(e))
-        return None
 
 
 class ToolResponse(BaseModel):
@@ -75,13 +49,14 @@ async def search_user_documents(request: ToolRequest, db: Session = Depends(get_
                 error="missing_query"
             )
         
-        # Get user UUID from email
-        user_uuid = await get_user_uuid_from_email(request.user_id, db)
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
         if not user_uuid:
             return ToolResponse(
                 success=False,
-                content="User not found or could not be created",
-                error="user_not_found"
+                content="User authentication failed",
+                error="auth_failed"
             )
         
         # Build query for user's documents only
@@ -111,11 +86,12 @@ async def search_user_documents(request: ToolRequest, db: Session = Depends(get_
         # Execute query
         results = db_query.order_by(Document.created_at.desc()).limit(limit).all()
         
-        # Format results
+        # Format results with document references
         documents = []
-        for result in results:
+        for idx, result in enumerate(results):
             doc = {
                 "id": str(result.id),
+                "ref": f"doc_{idx + 1}",  # Simple reference for LLM
                 "title": result.title,
                 "filename": result.original_filename,
                 "summary": result.summary,
@@ -125,10 +101,33 @@ async def search_user_documents(request: ToolRequest, db: Session = Depends(get_
             }
             documents.append(doc)
         
+        # Debug logging
+        logger.info("Search documents result", 
+                   document_count=len(documents), 
+                   sample_ids=[doc["id"] for doc in documents[:3]])
+        
+        # Create more informative content for the agent
+        if documents:
+            doc_list = []
+            for doc in documents:
+                doc_summary = f"- {doc['ref']} ({doc['id']}): {doc['title']}"
+                if doc.get('summary'):
+                    # Show first 100 chars of summary
+                    summary_preview = doc['summary'][:100] + "..." if len(doc['summary']) > 100 else doc['summary']
+                    doc_summary += f" - {summary_preview}"
+                doc_list.append(doc_summary)
+            
+            content = f"Found {len(documents)} documents matching '{query}'" + \
+                     (f" in category '{category}'" if category else "") + \
+                     f":\n\n" + "\n".join(doc_list) + \
+                     f"\n\nUse get_document with the ref (like '{documents[0]['ref']}') or ID to get full details."
+        else:
+            content = f"No documents found matching '{query}'" + \
+                     (f" in category '{category}'" if category else "")
+        
         return ToolResponse(
             success=True,
-            content=f"Found {len(documents)} documents matching '{query}'" + 
-                   (f" in category '{category}'" if category else ""),
+            content=content,
             metadata={
                 "documents": documents,
                 "count": len(documents),
@@ -161,14 +160,62 @@ async def get_user_document(request: ToolRequest, db: Session = Depends(get_db))
                 error="missing_document_id"
             )
         
-        # Get user UUID from email
-        user_uuid = await get_user_uuid_from_email(request.user_id, db)
+        # Debug logging
+        logger.info("Get document request", 
+                   document_id=document_id, 
+                   user_id=request.user_id)
+        
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
         if not user_uuid:
             return ToolResponse(
                 success=False,
-                content="User not found or could not be created",
-                error="user_not_found"
+                content="User authentication failed",
+                error="auth_failed"
             )
+        
+        # Handle both ref format (doc_1) and UUID format
+        if isinstance(document_id, str) and document_id.startswith("doc_"):
+            # This is a reference format, need to resolve to actual UUID
+            # Get recent search results to map ref to UUID
+            try:
+                ref_num = int(document_id.replace("doc_", ""))
+                
+                # Get user documents to find the one at this index
+                db_query = db.query(Document).filter(
+                    Document.user_id == user_uuid
+                ).order_by(Document.created_at.desc())
+                
+                # Get the document at the specified index (1-based)
+                target_document = db_query.offset(ref_num - 1).limit(1).first()
+                
+                if not target_document:
+                    return ToolResponse(
+                        success=False,
+                        content=f"Document reference {document_id} not found",
+                        error="document_ref_not_found"
+                    )
+                
+                document_id = target_document.id
+                
+            except (ValueError, IndexError):
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid document reference format: {document_id}",
+                    error="invalid_ref_format"
+                )
+        else:
+            # Convert document_id to UUID if it's a string UUID
+            try:
+                if isinstance(document_id, str):
+                    document_id = uuid.UUID(document_id)
+            except ValueError:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid document ID format: {document_id}",
+                    error="invalid_uuid"
+                )
         
         # Get document only if it belongs to the user
         document = db.query(Document).filter(
@@ -201,9 +248,33 @@ async def get_user_document(request: ToolRequest, db: Session = Depends(get_db))
             "confidence_score": document.confidence_score
         }
         
+        # Debug logging
+        logger.info("Document retrieved successfully", 
+                   document_id=str(document.id),
+                   title=document.title,
+                   content_length=len(document.raw_text or ""),
+                   summary_length=len(document.summary or ""))
+        
+        # Format the primary content with actual document information
+        content_preview = document.summary or "No summary available"
+        if len(content_preview) > 500:
+            content_preview = content_preview[:500] + "..."
+            
+        primary_content = f"Document: {document.title}\n\n{content_preview}"
+        
+        # Add structured data highlights if available
+        if document.structured_data:
+            structured_info = []
+            for key, value in document.structured_data.items():
+                if value and key.lower() in ['flight_number', 'departure_time', 'arrival_time', 'route', 'passenger', 'date']:
+                    structured_info.append(f"{key.replace('_', ' ').title()}: {value}")
+            
+            if structured_info:
+                primary_content += f"\n\nKey Details:\n" + "\n".join(structured_info)
+        
         return ToolResponse(
             success=True,
-            content=f"Retrieved document: {document.title}",
+            content=primary_content,
             metadata={"document": doc_data}
         )
         
@@ -222,13 +293,14 @@ async def get_travel_summary(request: ToolRequest, db: Session = Depends(get_db)
     Get user's travel summary and statistics
     """
     try:
-        # Get user UUID from email
-        user_uuid = await get_user_uuid_from_email(request.user_id, db)
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
         if not user_uuid:
             return ToolResponse(
                 success=False,
-                content="User not found or could not be created",
-                error="user_not_found"
+                content="User authentication failed",
+                error="auth_failed"
             )
         
         # Get document count by category

@@ -84,7 +84,7 @@ class AnthropicProvider(BaseProvider):
         max_tokens: int,
         temperature: float,
         tools: Optional[List[Tool]] = None,
-        max_rounds: int = 3,
+        max_rounds: int = 20,
         **kwargs
     ) -> AsyncGenerator[StreamingResponse, None]:
         """
