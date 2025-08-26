@@ -7,18 +7,10 @@ from sqlalchemy import pool
 
 from alembic import context
 
-# Load environment variables from .env files in order of preference
-env_files = [
-    os.getenv("ENV_FILE"),  # Explicit env file if set
-    "../.env.development",   # Development environment
-    "../.env",              # Main env file
-    ".env"                  # Local env file
-]
-
-for env_file in env_files:
-    if env_file and os.path.exists(env_file):
-        load_dotenv(env_file)
-        break
+# Load environment variables - prioritize development then main env
+load_dotenv("../.env.development")
+load_dotenv("../.env")
+load_dotenv(".env")
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -33,12 +25,16 @@ if os.getenv("DATABASE_URL"):
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import all models for autogenerate support
-from database import Base
-from models.user import User
-from models.document import Document, DocumentCategory, DocumentQuickRef
-
-target_metadata = Base.metadata
+# Import base metadata
+try:
+    from database import Base
+    # Import models to ensure they're registered with Base.metadata
+    from models.user import User
+    from models.document import Document, DocumentCategory, DocumentQuickRef
+    target_metadata = Base.metadata
+except ImportError as e:
+    print(f"Warning: Could not import models: {e}")
+    target_metadata = None
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -82,7 +78,7 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
         connect_args={
-            "connect_timeout": 30,
+            "connect_timeout": 10,
             "application_name": "kohtravel_migrations"
         }
     )

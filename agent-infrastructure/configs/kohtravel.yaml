@@ -1,0 +1,32 @@
+# KohTravel Agent Configuration
+# This config is now primarily for reference - tools and prompts are loaded from KohTravel API
+
+project:
+  name: "KohTravel"
+  description: "Travel document management and AI assistant"
+  backend_url: "http://localhost:8000/api/agent/tools"
+
+agent:
+  name: "KohTravel Travel Assistant"
+  # System prompt loaded from backend API at runtime
+
+provider:
+  type: "anthropic"
+  model: "claude-3-5-sonnet-20241022"
+  temperature: 0.1
+  max_tokens: 4096
+
+# External tools loaded from KohTravel backend:
+# - search_documents: Search user's travel documents
+# - get_document: Get specific document details
+# - travel_summary: Get travel statistics and overview
+
+# Standard tools always available:
+# - read_file: Read files (with security restrictions)
+# - write_file: Write files (if enabled)
+# - list_directory: List directory contents
+
+security:
+  user_isolation: true
+  external_tool_timeout: 30
+  file_access_restricted: true
