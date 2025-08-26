@@ -327,3 +327,93 @@ async def get_categories(db: Session = Depends(get_db)):
             for cat in categories
         ]
     }
+
+@router.post("/{document_id}/reprocess")
+async def reprocess_document(
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Reprocess an existing document with current AI model"""
+    
+    # Get the document
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id
+    ).first()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    if not document.raw_text:
+        raise HTTPException(status_code=400, detail="Document raw text not available for reprocessing")
+    
+    # Reset processing fields
+    document.processing_status = "processing"
+    document.summary = None
+    document.structured_data = None
+    document.confidence_score = None
+    document.error_message = None
+    
+    # Clear existing quick refs
+    db.query(DocumentQuickRef).filter(DocumentQuickRef.document_id == document.id).delete()
+    db.commit()
+    
+    # Schedule AI reprocessing with existing raw text
+    async def reprocess_with_ai():
+        try:
+            processor = DocumentProcessor(db)
+            if processor.claude_client:
+                ai_result = await processor._process_with_ai(document.raw_text, document.original_filename)
+                
+                if ai_result and isinstance(ai_result, dict):
+                    # Update document with AI results
+                    document.summary = ai_result.get("summary")
+                    document.structured_data = ai_result.get("structured_data")
+                    document.confidence_score = ai_result.get("confidence_score")
+                    
+                    # Set category if identified
+                    category_name = ai_result.get("category")
+                    if category_name:
+                        category = db.query(DocumentCategory).filter(
+                            DocumentCategory.name.ilike(f"%{category_name}%")
+                        ).first()
+                        if category:
+                            document.category_id = category.id
+                    
+                    # Create quick reference fields
+                    quick_refs_data = ai_result.get("quick_refs", {})
+                    if isinstance(quick_refs_data, dict):
+                        for field_name, field_data in quick_refs_data.items():
+                            if field_data is None or not isinstance(field_data, dict):
+                                continue
+                                
+                            quick_ref = DocumentQuickRef(
+                                document_id=document.id,
+                                field_name=field_name,
+                                field_value=str(field_data.get("value", "")),
+                                field_type=field_data.get("type", "text")
+                            )
+                            db.add(quick_ref)
+                
+                # Mark as completed
+                document.processing_status = "completed"
+                db.commit()
+            else:
+                document.processing_status = "failed"
+                document.error_message = "AI processing unavailable"
+                db.commit()
+                
+        except Exception as e:
+            document.processing_status = "failed"
+            document.error_message = str(e)
+            db.commit()
+    
+    background_tasks.add_task(reprocess_with_ai)
+    
+    return {
+        "document_id": document_id,
+        "status": "reprocessing_started",
+        "message": "Document reprocessing started with current model configuration"
+    }

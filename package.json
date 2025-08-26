@@ -3,10 +3,14 @@
   "version": "1.0.0",
   "description": "Travel planning and management web application",
   "scripts": {
-    "dev": "concurrently \"cd frontend && npm run dev\" \"cd api && uv run --with fastapi --with uvicorn --with python-multipart uvicorn main:app --reload --port 8001\"",
+    "dev": "concurrently \"cd frontend && PORT=3000 npm run dev\" \"cd api && PORT=8001 uv run --with fastapi --with uvicorn --with python-multipart --with psycopg2-binary --with python-dotenv uvicorn main:app --reload --host 0.0.0.0 --port 8001\"",
+    "dev:frontend": "cd frontend && PORT=3000 npm run dev",
+    "dev:api": "cd api && PORT=8001 uv run --with fastapi --with uvicorn --with python-multipart --with psycopg2-binary --with python-dotenv uvicorn main:app --reload --host 0.0.0.0 --port 8001",
+    "dev:migrate": "cd api && uv run --with alembic --with python-dotenv alembic upgrade head",
     "build": "cd frontend && npm run build",
     "start": "cd frontend && npm start",
-    "deploy": "vercel --prod"
+    "deploy": "vercel --prod",
+    "kill-ports": "lsof -ti:3000,8000,8001 | xargs -r kill -9"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

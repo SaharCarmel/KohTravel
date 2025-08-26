@@ -7,9 +7,18 @@ from sqlalchemy import pool
 
 from alembic import context
 
-# Load environment variables  
-env_file = os.getenv("ENV_FILE", "../.env.development")
-load_dotenv(env_file)
+# Load environment variables from .env files in order of preference
+env_files = [
+    os.getenv("ENV_FILE"),  # Explicit env file if set
+    "../.env.development",   # Development environment
+    "../.env",              # Main env file
+    ".env"                  # Local env file
+]
+
+for env_file in env_files:
+    if env_file and os.path.exists(env_file):
+        load_dotenv(env_file)
+        break
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -72,11 +81,16 @@ def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args={
+            "connect_timeout": 30,
+            "application_name": "kohtravel_migrations"
+        }
     )
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection, 
+            target_metadata=target_metadata
         )
 
         with context.begin_transaction():

@@ -43,7 +43,7 @@ def get_current_user(
                 name="Development User"
             )
             db.add(mock_user)
-            db.commit()
+            db.flush()  # Use flush instead of commit to avoid transaction conflicts
             db.refresh(mock_user)
         
         return mock_user

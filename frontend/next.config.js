@@ -1,30 +1,39 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  outputFileTracingRoot: require('path').join(__dirname, '../'),
   async rewrites() {
+    const apiPort = process.env.API_PORT || '8001';
+    const apiHost = process.env.API_HOST || '127.0.0.1';
+    const apiBaseUrl = `http://${apiHost}:${apiPort}`;
+    
     return [
       {
         source: '/api/documents',
-        destination: 'http://127.0.0.1:8000/api/documents/'
+        destination: `${apiBaseUrl}/api/documents/`
       },
       {
         source: '/api/documents/',
-        destination: 'http://127.0.0.1:8000/api/documents/'
+        destination: `${apiBaseUrl}/api/documents/`
       },
       {
         source: '/api/documents/:id',
-        destination: 'http://127.0.0.1:8000/api/documents/:id'
+        destination: `${apiBaseUrl}/api/documents/:id`
       },
       {
         source: '/api/documents/:id/',
-        destination: 'http://127.0.0.1:8000/api/documents/:id'
+        destination: `${apiBaseUrl}/api/documents/:id`
       },
       {
         source: '/api/documents/:path*',
-        destination: 'http://127.0.0.1:8000/api/documents/:path*'
+        destination: `${apiBaseUrl}/api/documents/:path*`
       },
       {
         source: '/api/health',
-        destination: 'http://127.0.0.1:8000/api/health'
+        destination: `${apiBaseUrl}/api/health`
+      },
+      {
+        source: '/api/chat/:path*',
+        destination: `${apiBaseUrl}/api/chat/:path*`
       }
     ]
   }

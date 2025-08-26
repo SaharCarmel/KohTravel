@@ -57,7 +57,7 @@ class DocumentProcessor:
                 logger.info(f"Processing document {document_id} with AI")
                 ai_result = await self._process_with_ai(raw_text, document.original_filename)
                 
-                if ai_result:
+                if ai_result and isinstance(ai_result, dict):
                     # Update document with AI results
                     document.summary = ai_result.get("summary")
                     document.structured_data = ai_result.get("structured_data")
@@ -74,14 +74,19 @@ class DocumentProcessor:
                     
                     # Create quick reference fields
                     quick_refs_data = ai_result.get("quick_refs", {})
-                    for field_name, field_data in quick_refs_data.items():
-                        quick_ref = DocumentQuickRef(
-                            document_id=document.id,
-                            field_name=field_name,
-                            field_value=str(field_data.get("value", "")),
-                            field_type=field_data.get("type", "text")
-                        )
-                        self.db.add(quick_ref)
+                    if isinstance(quick_refs_data, dict):
+                        for field_name, field_data in quick_refs_data.items():
+                            if field_data is None or not isinstance(field_data, dict):
+                                logger.warning(f"Invalid field_data for {field_name}: {field_data}")
+                                continue
+                                
+                            quick_ref = DocumentQuickRef(
+                                document_id=document.id,
+                                field_name=field_name,
+                                field_value=str(field_data.get("value", "")),
+                                field_type=field_data.get("type", "text")
+                            )
+                            self.db.add(quick_ref)
             
             # Mark as completed
             document.processing_status = "completed"
@@ -138,10 +143,11 @@ class DocumentProcessor:
             # Create AI prompt for document analysis
             prompt = self._create_analysis_prompt(raw_text, filename)
             
-            # Call Claude API
+            # Call Claude API with configurable model
+            model = os.getenv("DOCUMENT_PROCESSING_MODEL", "claude-3-haiku-20240307")
             message = self.claude_client.messages.create(
-                model="claude-3-haiku-20240307",  # Using Haiku for faster processing
-                max_tokens=2000,
+                model=model,
+                max_tokens=4000,  # Higher token limit for detailed analysis
                 temperature=0.1,
                 messages=[
                     {
@@ -167,34 +173,39 @@ class DocumentProcessor:
         
         filename_hint = f"Filename: {filename}\n\n" if filename else ""
         
-        return f"""You are a travel document analysis assistant. Analyze this document and extract key information.
+        return f"""You are a travel document analysis assistant. Analyze this COMPLETE document and extract ALL travel information.
+
+IMPORTANT: This document may contain multiple flight segments, hotel stays, or travel components. Extract information from the ENTIRE document, not just the beginning.
 
 {filename_hint}Document Content:
-{text[:4000]}...  # Truncate for token limits
+{text}
 
 Please analyze this document and respond with a JSON object containing:
 
 1. "category": The document type (e.g., "flight_booking", "hotel_reservation", "restaurant_receipt", "tour_booking", "transport_ticket", "visa_document", "travel_insurance", "other")
 
-2. "summary": A concise 2-3 sentence summary of the document
+2. "summary": A comprehensive summary that includes ALL travel segments, dates, destinations, and key details found in the document. For multi-segment trips, list each leg clearly.
 
 3. "confidence_score": Float between 0-1 indicating confidence in the analysis
 
-4. "structured_data": Object with key document fields like:
-   - dates (departure, arrival, booking date)
-   - locations (cities, countries, addresses)
-   - prices and currencies
-   - confirmation numbers
-   - traveler names
-   - company/service provider
+4. "structured_data": Object with ALL extracted information including:
+   - all_flights: Array of flight objects with departure/arrival cities, dates, times, flight numbers
+   - all_hotels: Array of hotel bookings with dates, locations
+   - traveler_name: Passenger/guest name
+   - booking_reference: Confirmation numbers
+   - total_cost: Total price if available
+   - travel_dates: Start and end dates of entire trip
+   - destinations: All cities/countries visited
+   - airlines: All carriers used
 
-5. "quick_refs": Object with frequently searched fields:
-   - "total_amount": {{"value": "123.45", "type": "currency"}}
-   - "travel_date": {{"value": "2024-03-15", "type": "date"}}
-   - "destination": {{"value": "Paris", "type": "location"}}
-   - "confirmation": {{"value": "ABC123", "type": "text"}}
+5. "quick_refs": Object with the most important searchable fields:
+   - "total_amount": {{"value": "amount", "type": "currency"}}
+   - "travel_period": {{"value": "start_date to end_date", "type": "date_range"}}
+   - "destinations": {{"value": "City1, City2, City3", "type": "location"}}
+   - "confirmation": {{"value": "booking_reference", "type": "text"}}
+   - "passenger": {{"value": "traveler_name", "type": "text"}}
 
-Focus on travel-related information. If this doesn't appear to be a travel document, set category to "other" and confidence_score below 0.5.
+CRITICAL: Process the ENTIRE document. Do not truncate or ignore later sections. For multi-segment trips, capture ALL segments in your analysis.
 
 Respond with valid JSON only, no additional text."""
     
