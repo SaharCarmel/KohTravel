@@ -1,8 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from alembic import command
-from alembic.config import Config
 import os
 import re
 
@@ -45,18 +43,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-async def startup_event():
-    """Run database migrations on startup"""
-    if os.getenv("RUN_MIGRATIONS", "true") == "true":
-        try:
-            alembic_cfg = Config("alembic.ini")
-            command.upgrade(alembic_cfg, "head")
-            print("✅ Database migrations completed successfully")
-        except Exception as e:
-            print(f"❌ Migration failed: {e}")
-            # Don't crash the app, just log the error
-            pass
+# For Vercel serverless deployment:
+# - Migrations should be run manually or via CI/CD before deployment
+# - Each serverless function is stateless and ephemeral
+# - Running migrations on every cold start would be inefficient and problematic
 
 # Include routers
 app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
