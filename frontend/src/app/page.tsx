@@ -6,7 +6,7 @@ import Link from "next/link";
 export default function Home() {
   return (
     <div className="min-h-screen p-8">
-      <main className="max-w-4xl mx-auto">
+      <main className="max-w-4xl mx-auto mt-8">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold mb-4">KohTravel</h1>
           <p className="text-muted-foreground text-lg">Your travel planning companion</p>
@@ -16,6 +16,18 @@ export default function Home() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+          <Card>
+            <CardHeader>
+              <CardTitle>Chat Assistant</CardTitle>
+              <CardDescription>Get instant answers about your travel documents and trip planning with AI assistance</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Link href="/chat">
+                <Button className="w-full">Start Chat</Button>
+              </Link>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Document Management</CardTitle>

@@ -2,7 +2,7 @@
 const nextConfig = {
   outputFileTracingRoot: require('path').join(__dirname, '../'),
   async rewrites() {
-    const apiPort = process.env.API_PORT || '8001';
+    const apiPort = process.env.API_PORT || '8000';
     const apiHost = process.env.API_HOST || '127.0.0.1';
     const apiBaseUrl = `http://${apiHost}:${apiPort}`;
     

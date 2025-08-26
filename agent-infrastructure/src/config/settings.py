@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # Server settings
     host: str = "0.0.0.0"
     port: int = 8001
-    cors_origins: List[str] = ["*"]
+    cors_origins: str = "*"
     
     # Authentication
     auth_enabled: bool = False
@@ -45,11 +45,25 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
         case_sensitive = False
     
-    @validator("cors_origins", pre=True)
-    def parse_cors_origins(cls, v):
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v or ["*"]
+    def get_cors_origins_list(self) -> List[str]:
+        """Parse CORS origins into list"""
+        if not self.cors_origins:
+            return ["*"]
+        
+        v = self.cors_origins.strip()
+        if v == "*":
+            return ["*"]
+        
+        # Handle JSON array format
+        if v.startswith('[') and v.endswith(']'):
+            try:
+                import json
+                return json.loads(v)
+            except:
+                pass
+        
+        # Handle comma-separated format
+        return [origin.strip() for origin in v.split(",") if origin.strip()]
     
     @validator("allowed_file_paths", pre=True)
     def parse_file_paths(cls, v):

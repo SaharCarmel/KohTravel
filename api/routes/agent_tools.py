@@ -10,6 +10,7 @@ import structlog
 from database import get_db
 from models.document import Document, DocumentCategory, DocumentQuickRef
 from models.user import User
+import uuid
 
 logger = structlog.get_logger(__name__)
 
@@ -17,8 +18,36 @@ router = APIRouter()
 
 
 class ToolRequest(BaseModel):
-    user_id: str
+    user_id: str  # This will be email from the agent
     parameters: Dict[str, Any]
+
+
+async def get_user_uuid_from_email(email: str, db: Session) -> Optional[str]:
+    """Get user UUID from email, create user if doesn't exist"""
+    try:
+        # First try to find existing user by vercel_user_id (which might be email)
+        user = db.query(User).filter(
+            (User.email == email) | (User.vercel_user_id == email)
+        ).first()
+        
+        if user:
+            return str(user.id)
+        
+        # If user doesn't exist, create a minimal user record
+        new_user = User(
+            vercel_user_id=email,  # Use email as vercel_user_id for now
+            email=email
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        logger.info("Created new user for agent", email=email, user_id=str(new_user.id))
+        return str(new_user.id)
+        
+    except Exception as e:
+        logger.error("Failed to get/create user", email=email, error=str(e))
+        return None
 
 
 class ToolResponse(BaseModel):
@@ -46,6 +75,15 @@ async def search_user_documents(request: ToolRequest, db: Session = Depends(get_
                 error="missing_query"
             )
         
+        # Get user UUID from email
+        user_uuid = await get_user_uuid_from_email(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User not found or could not be created",
+                error="user_not_found"
+            )
+        
         # Build query for user's documents only
         db_query = db.query(
             Document.id,
@@ -58,7 +96,7 @@ async def search_user_documents(request: ToolRequest, db: Session = Depends(get_
         ).join(
             DocumentCategory, Document.category_id == DocumentCategory.id, isouter=True
         ).filter(
-            Document.user_id == request.user_id
+            Document.user_id == user_uuid
         ).filter(
             # Search in multiple fields
             Document.raw_text.ilike(f"%{query}%") |
@@ -123,10 +161,19 @@ async def get_user_document(request: ToolRequest, db: Session = Depends(get_db))
                 error="missing_document_id"
             )
         
+        # Get user UUID from email
+        user_uuid = await get_user_uuid_from_email(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User not found or could not be created",
+                error="user_not_found"
+            )
+        
         # Get document only if it belongs to the user
         document = db.query(Document).filter(
             Document.id == document_id,
-            Document.user_id == request.user_id
+            Document.user_id == user_uuid
         ).first()
         
         if not document:
@@ -175,19 +222,29 @@ async def get_travel_summary(request: ToolRequest, db: Session = Depends(get_db)
     Get user's travel summary and statistics
     """
     try:
+        # Get user UUID from email
+        user_uuid = await get_user_uuid_from_email(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User not found or could not be created",
+                error="user_not_found"
+            )
+        
         # Get document count by category
+        from sqlalchemy import func
         category_stats = db.query(
             DocumentCategory.name,
-            db.func.count(Document.id).label("count")
+            func.count(Document.id).label("count")
         ).join(
             Document, Document.category_id == DocumentCategory.id
         ).filter(
-            Document.user_id == request.user_id
+            Document.user_id == user_uuid
         ).group_by(DocumentCategory.name).all()
         
         # Get total documents
         total_docs = db.query(Document).filter(
-            Document.user_id == request.user_id
+            Document.user_id == user_uuid
         ).count()
         
         # Get recent documents
@@ -198,7 +255,7 @@ async def get_travel_summary(request: ToolRequest, db: Session = Depends(get_db)
         ).join(
             DocumentCategory, Document.category_id == DocumentCategory.id, isouter=True
         ).filter(
-            Document.user_id == request.user_id
+            Document.user_id == user_uuid
         ).order_by(Document.created_at.desc()).limit(5).all()
         
         # Format data

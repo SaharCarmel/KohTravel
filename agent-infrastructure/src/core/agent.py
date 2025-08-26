@@ -48,6 +48,9 @@ class Agent:
         """Register a tool with the agent"""
         if name in self.config.enabled_tools or not self.config.enabled_tools:
             self.tools[name] = tool
+            # Also register with provider for tool execution
+            if hasattr(self.provider, 'set_tools'):
+                self.provider.set_tools(self.tools)
             logger.info("Tool registered", tool_name=name)
         else:
             logger.warning("Tool not enabled in config", tool_name=name)
@@ -105,51 +108,32 @@ class Agent:
         # Build messages for provider with context injection
         messages = self._build_messages_with_context(conversation, full_context)
         
-        # Stream response from provider
+        # Set up tools for provider (provider handles tool execution)
+        provider_tools = list(self.tools.values()) if self.tools else None
+        
+        # Stream response from provider - provider handles complete tool execution flow
+        final_response_content = ""
         async for chunk in self.provider.stream_completion(
             messages=messages,
             model=self.config.model,
             max_tokens=self.config.max_tokens,
             temperature=self.config.temperature,
-            tools=list(self.tools.values()) if self.tools else None
+            tools=provider_tools,
+            context=full_context  # Pass context for tool execution
         ):
-            # Handle tool calls
-            if chunk.type == "tool_call":
-                yield StreamingResponse(type="tool_call_start", data=chunk.data)
-                
-                try:
-                    tool_result = await self._execute_tool(chunk.data, session_id, full_context)
-                    yield StreamingResponse(type="tool_call_result", data=tool_result.dict())
-                    
-                    # Add tool result to conversation
-                    conversation.add_message(Message(
-                        role=MessageRole.TOOL,
-                        content=tool_result.content,
-                        tool_call_id=chunk.data.get("id")
-                    ))
-                    
-                except Exception as e:
-                    error_result = ToolResult(
-                        success=False,
-                        content=f"Tool execution failed: {str(e)}",
-                        error=str(e)
-                    )
-                    yield StreamingResponse(type="tool_call_error", data=error_result.dict())
-                    logger.error("Tool execution failed", error=str(e), tool=chunk.data.get("name"))
+            # Track content for conversation history
+            if chunk.type == "content":
+                final_response_content += chunk.data.get("content", "")
             
-            # Handle regular content
-            elif chunk.type == "content":
-                yield chunk
-            
-            # Handle completion
-            elif chunk.type == "done":
-                # Add assistant response to conversation
-                if hasattr(chunk, 'final_message') and chunk.final_message:
-                    conversation.add_message(Message(
-                        role=MessageRole.ASSISTANT,
-                        content=chunk.final_message
-                    ))
-                yield chunk
+            # Pass through all responses
+            yield chunk
+        
+        # Add final response to conversation
+        if final_response_content:
+            conversation.add_message(Message(
+                role=MessageRole.ASSISTANT,
+                content=final_response_content
+            ))
     
     def _build_messages_with_context(
         self, 
