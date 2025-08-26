@@ -13,7 +13,14 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable not set")
 
-engine = create_engine(DATABASE_URL)
+# Configure SSL for Railway PostgreSQL - disable SSL verification for development
+engine_kwargs = {}
+if "railway" in DATABASE_URL.lower() or "rlwy.net" in DATABASE_URL.lower():
+    engine_kwargs["connect_args"] = {
+        "sslmode": "disable"
+    }
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
