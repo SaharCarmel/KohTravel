@@ -39,6 +39,7 @@ def validate_file(file: UploadFile) -> None:
         )
 
 @router.post("/upload")
+@router.post("/upload/")  # Handle both with and without trailing slash
 async def upload_documents(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
