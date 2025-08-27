@@ -20,4 +20,6 @@ dependencies = [
     "sse-starlette>=3.0.2",
     "structlog>=25.4.0",
     "uvicorn>=0.35.0",
+    "python-jose[cryptography]>=3.3.0",
+    "cryptography>=42.0.0",
 ]

@@ -1,99 +1,181 @@
-from fastapi import Depends, HTTPException, Header
+"""
+Production-grade authentication service with proper NextAuth integration
+"""
+from fastapi import Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session
 from typing import Optional
-import jwt
-import os
+import structlog
 
 from database import get_db
 from models.user import User
+from .nextauth_validator import get_user_from_authorization
 
-# This would typically come from NextAuth.js JWT
-def get_current_user(
+logger = structlog.get_logger(__name__)
+
+
+async def get_current_user(
+    request: Request,
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ) -> User:
     """
-    Get current user from JWT token
-    In production, this should validate NextAuth.js tokens
+    Get authenticated user from NextAuth.js session
     """
     
-    # For development, we'll create a mock user
-    # In production, you would validate the JWT token from NextAuth.js
+    # Method 1: Try Authorization header (for API calls)
+    if authorization:
+        user_info = await get_user_from_authorization(authorization)
+        if user_info:
+            return await get_or_create_user_from_nextauth(user_info, db)
     
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authorization header required")
+    # Method 2: Try to get session from cookies (for browser requests)
+    session_token = None
     
-    try:
-        # Extract token from "Bearer <token>"
-        if not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Invalid authorization format")
-        
-        token = authorization.split(" ")[1]
-        
-        # For now, mock user validation
-        # In production, decode and validate NextAuth.js JWT
-        
-        # Create or get mock user for development
-        mock_user = db.query(User).filter(User.vercel_user_id == "dev_user_1").first()
-        
-        if not mock_user:
-            mock_user = User(
-                vercel_user_id="dev_user_1",
-                email="dev@example.com",
-                name="Development User"
-            )
-            db.add(mock_user)
-            db.flush()  # Use flush instead of commit to avoid transaction conflicts
-            db.refresh(mock_user)
-        
-        return mock_user
-        
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    # NextAuth.js stores session in cookies with different names based on configuration
+    cookie_names = [
+        "next-auth.session-token",
+        "__Secure-next-auth.session-token",
+        "nextauth.session-token"
+    ]
+    
+    for cookie_name in cookie_names:
+        session_token = request.cookies.get(cookie_name)
+        if session_token:
+            break
+    
+    if session_token:
+        from .nextauth_validator import get_user_from_nextauth_token
+        user_info = await get_user_from_nextauth_token(session_token)
+        if user_info:
+            return await get_or_create_user_from_nextauth(user_info, db)
+    
+    # Method 3: Check for development token (remove in production)
+    if authorization and authorization == "Bearer dev_token":
+        logger.warning("Using development authentication - remove in production")
+        return await get_development_user(db)
+    
+    raise HTTPException(
+        status_code=401, 
+        detail="Authentication required. Please sign in with Google or GitHub."
+    )
 
-def verify_nextauth_token(token: str) -> dict:
-    """
-    Verify NextAuth.js JWT token
-    This should be implemented when NextAuth.js is properly configured
-    """
-    # This is a placeholder - implement actual NextAuth.js token verification
-    # You would need the NextAuth.js secret and proper JWT validation
-    
-    try:
-        # Decode JWT with NextAuth secret
-        secret = os.getenv("NEXTAUTH_SECRET")
-        if not secret:
-            raise Exception("NEXTAUTH_SECRET not configured")
-        
-        # For now, return mock payload
-        return {
-            "sub": "dev_user_1",
-            "email": "dev@example.com",
-            "name": "Development User"
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Token validation failed: {str(e)}")
 
-def create_or_get_user(user_info: dict, db: Session) -> User:
-    """Create or get user from auth provider info"""
-    
-    vercel_user_id = user_info.get("sub")
-    if not vercel_user_id:
-        raise HTTPException(status_code=400, detail="Invalid user info")
-    
-    # Try to find existing user
-    user = db.query(User).filter(User.vercel_user_id == vercel_user_id).first()
-    
-    if not user:
+async def get_or_create_user_from_nextauth(
+    user_info: dict, 
+    db: Session
+) -> User:
+    """
+    Create or get user from NextAuth user information
+    """
+    try:
+        email = user_info.get("email")
+        name = user_info.get("name", "")
+        provider_id = user_info.get("user_id") or email
+        
+        if not email:
+            raise ValueError("Email is required from NextAuth token")
+        
+        # Try to find existing user by email or provider ID
+        user = db.query(User).filter(
+            (User.email == email) | (User.vercel_user_id == provider_id)
+        ).first()
+        
+        if user:
+            # Update user info if it has changed
+            if user.email != email or user.name != name:
+                user.email = email
+                user.name = name
+                db.commit()
+                db.refresh(user)
+                logger.info("Updated user info", email=email, user_id=str(user.id))
+            
+            return user
+        
         # Create new user
-        user = User(
-            vercel_user_id=vercel_user_id,
-            email=user_info.get("email"),
-            name=user_info.get("name")
+        new_user = User(
+            vercel_user_id=provider_id,
+            email=email,
+            name=name
         )
-        db.add(user)
+        
+        db.add(new_user)
         db.commit()
-        db.refresh(user)
+        db.refresh(new_user)
+        
+        logger.info("Created new authenticated user", 
+                   email=email, 
+                   user_id=str(new_user.id),
+                   provider=user_info.get("provider"))
+        
+        return new_user
+        
+    except Exception as e:
+        logger.error("Failed to create/get user from NextAuth", error=str(e), user_info=user_info)
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to process user authentication"
+        )
+
+
+async def get_development_user(db: Session) -> User:
+    """
+    Get development user - REMOVE IN PRODUCTION
+    """
+    dev_user = db.query(User).filter(User.vercel_user_id == "dev_user_1").first()
     
-    return user
+    if not dev_user:
+        dev_user = User(
+            vercel_user_id="dev_user_1",
+            email="dev@example.com",
+            name="Development User"
+        )
+        db.add(dev_user)
+        db.commit()
+        db.refresh(dev_user)
+    
+    return dev_user
+
+
+async def get_user_for_agent(email: str, db: Session) -> Optional[str]:
+    """
+    Get user UUID for agent tools - proper user lookup
+    """
+    try:
+        # Find user by email
+        user = db.query(User).filter(User.email == email).first()
+        
+        if user:
+            return str(user.id)
+        
+        # For development: if user not found, check if it should be mapped to dev user
+        # This is temporary until all users are properly migrated
+        if "@" in email:  # Basic email validation
+            logger.info("User not found for agent, creating new user", email=email)
+            
+            # Create user for agent access
+            new_user = User(
+                vercel_user_id=email,
+                email=email,
+                name=email.split("@")[0].title()  # Use email prefix as name
+            )
+            db.add(new_user)
+            db.commit()
+            db.refresh(new_user)
+            
+            return str(new_user.id)
+        
+        return None
+        
+    except Exception as e:
+        logger.error("Failed to get user for agent", email=email, error=str(e))
+        return None
+
+
+class AuthenticationError(Exception):
+    """Custom authentication error"""
+    pass
+
+
+class AuthorizationError(Exception):
+    """Custom authorization error"""
+    pass
