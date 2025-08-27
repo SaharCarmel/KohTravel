@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import String
 import structlog
 
 from database import get_db
@@ -42,6 +43,13 @@ async def search_user_documents(request: ToolRequest, db: Session = Depends(get_
         category = request.parameters.get("category")
         limit = min(request.parameters.get("limit", 10), 50)  # Cap at 50
         
+        # Log the exact query being searched
+        logger.info("Search query received", 
+                   query=query, 
+                   query_length=len(query),
+                   category=category,
+                   user_id=request.user_id)
+        
         if not query:
             return ToolResponse(
                 success=False,
@@ -73,10 +81,11 @@ async def search_user_documents(request: ToolRequest, db: Session = Depends(get_
         ).filter(
             Document.user_id == user_uuid
         ).filter(
-            # Search in multiple fields
+            # Search in multiple fields including structured data
             Document.raw_text.ilike(f"%{query}%") |
             Document.title.ilike(f"%{query}%") |
-            Document.summary.ilike(f"%{query}%")
+            Document.summary.ilike(f"%{query}%") |
+            Document.structured_data.cast(String).ilike(f"%{query}%")
         )
         
         # Filter by category if specified
@@ -85,6 +94,12 @@ async def search_user_documents(request: ToolRequest, db: Session = Depends(get_
         
         # Execute query
         results = db_query.order_by(Document.created_at.desc()).limit(limit).all()
+        
+        # Log query results for debugging
+        logger.info("Search query executed", 
+                   query=query,
+                   results_found=len(results),
+                   result_titles=[r.title for r in results[:3]])  # Log first 3 titles
         
         # Format results with document references
         documents = []
