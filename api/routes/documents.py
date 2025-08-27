@@ -180,6 +180,28 @@ async def get_documents(
         "limit": limit
     }
 
+@router.get("/categories")
+@router.get("/categories/")
+async def get_categories(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all document categories"""
+    
+    categories = db.query(DocumentCategory).all()
+    
+    return {
+        "categories": [
+            {
+                "id": cat.id,
+                "name": cat.name,
+                "keywords": cat.keywords,
+                "extraction_fields": cat.extraction_fields
+            }
+            for cat in categories
+        ]
+    }
+
 @router.get("/{document_id}")
 async def get_document(
     document_id: str,
@@ -310,24 +332,6 @@ async def get_processing_status(
             await asyncio.sleep(2)
     
     return EventSourceResponse(event_generator())
-
-@router.get("/categories/")
-async def get_categories(db: Session = Depends(get_db)):
-    """Get all document categories"""
-    
-    categories = db.query(DocumentCategory).all()
-    
-    return {
-        "categories": [
-            {
-                "id": cat.id,
-                "name": cat.name,
-                "keywords": cat.keywords,
-                "extraction_fields": cat.extraction_fields
-            }
-            for cat in categories
-        ]
-    }
 
 @router.post("/{document_id}/reprocess")
 async def reprocess_document(
