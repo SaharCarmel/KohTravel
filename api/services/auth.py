@@ -22,11 +22,20 @@ async def get_current_user(
     Get authenticated user from NextAuth.js session
     """
     
+    logger.info("Authentication attempt", 
+                has_auth_header=bool(authorization),
+                auth_header_prefix=authorization[:20] if authorization else None,
+                cookies=list(request.cookies.keys()))
+    
     # Method 1: Try Authorization header (for API calls)
     if authorization:
+        logger.info("Trying Authorization header authentication")
         user_info = await get_user_from_authorization(authorization)
         if user_info:
+            logger.info("Authorization header authentication successful", email=user_info.get("email"))
             return await get_or_create_user_from_nextauth(user_info, db)
+        else:
+            logger.warning("Authorization header authentication failed")
     
     # Method 2: Try to get session from cookies (for browser requests)
     session_token = None
@@ -38,22 +47,31 @@ async def get_current_user(
         "nextauth.session-token"
     ]
     
+    found_cookie_name = None
     for cookie_name in cookie_names:
         session_token = request.cookies.get(cookie_name)
         if session_token:
+            found_cookie_name = cookie_name
             break
     
     if session_token:
+        logger.info("Trying cookie authentication", 
+                   cookie_name=found_cookie_name,
+                   token_prefix=session_token[:20])
         from .nextauth_validator import get_user_from_nextauth_token
         user_info = await get_user_from_nextauth_token(session_token)
         if user_info:
+            logger.info("Cookie authentication successful", email=user_info.get("email"))
             return await get_or_create_user_from_nextauth(user_info, db)
+        else:
+            logger.warning("Cookie authentication failed")
     
     # Method 3: Check for development token (remove in production)
     if authorization and authorization == "Bearer dev_token":
         logger.warning("Using development authentication - remove in production")
         return await get_development_user(db)
     
+    logger.error("All authentication methods failed")
     raise HTTPException(
         status_code=401, 
         detail="Authentication required. Please sign in with Google or GitHub."
@@ -134,6 +152,7 @@ async def get_development_user(db: Session) -> User:
         db.refresh(dev_user)
     
     return dev_user
+
 
 
 async def get_user_for_agent(email: str, db: Session) -> Optional[str]:

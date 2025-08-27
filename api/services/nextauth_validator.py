@@ -2,19 +2,20 @@
 Production-grade NextAuth.js token validation for FastAPI
 """
 import os
+import json
 from typing import Optional, Dict, Any
-import jwt
-from jose import JWTError, jwt as jose_jwt
-from datetime import datetime
 import structlog
 from fastapi import HTTPException
+from hkdf import Hkdf
+from jose.jwe import decrypt
+from jose import JWTError
 
 logger = structlog.get_logger(__name__)
 
 
 class NextAuthValidator:
     """
-    Production-grade NextAuth.js token validator
+    Production-grade NextAuth.js token validator with proper JWE decryption
     """
     
     def __init__(self):
@@ -22,23 +23,68 @@ class NextAuthValidator:
         if not self.secret:
             raise ValueError("NEXTAUTH_SECRET environment variable is required")
         
-        self.algorithm = "HS256"
         logger.info("NextAuth validator initialized")
+    
+    def _get_encryption_key_v4(self, secret: str) -> bytes:
+        """
+        Generate encryption key for NextAuth.js v4
+        """
+        # NextAuth.js v4: empty salt, specific info string
+        hkdf = Hkdf("", bytes(secret, "utf-8"))
+        return hkdf.expand(b"NextAuth.js Generated Encryption Key", 32)
+    
+    def _get_encryption_key_v5(self, secret: str, salt: str = "__Secure-next-auth.session-token") -> bytes:
+        """
+        Generate encryption key for Auth.js v5 (NextAuth v5)
+        """
+        # Auth.js v5: cookie name as salt, different info string
+        hkdf = Hkdf(bytes(salt, "utf-8"), bytes(secret, "utf-8"))
+        info_string = f"Auth.js Generated Encryption Key ({salt})"
+        return hkdf.expand(bytes(info_string, "utf-8"), 32)
+    
+    def _try_decrypt_jwe(self, token: str) -> Optional[Dict[str, Any]]:
+        """
+        Try to decrypt JWE token using different key derivation methods
+        """
+        # List of possible salt values (cookie names)
+        possible_salts = [
+            "__Secure-next-auth.session-token",
+            "next-auth.session-token", 
+            "nextauth.session-token"
+        ]
+        
+        # Try NextAuth v4 approach first
+        try:
+            encryption_key = self._get_encryption_key_v4(self.secret)
+            decrypted_bytes = decrypt(token, encryption_key)
+            return json.loads(decrypted_bytes.decode('utf-8'))
+        except Exception as e:
+            logger.debug("NextAuth v4 decryption failed", error=str(e))
+        
+        # Try Auth.js v5 approach with different salts
+        for salt in possible_salts:
+            try:
+                encryption_key = self._get_encryption_key_v5(self.secret, salt)
+                decrypted_bytes = decrypt(token, encryption_key)
+                return json.loads(decrypted_bytes.decode('utf-8'))
+            except Exception as e:
+                logger.debug(f"Auth.js v5 decryption failed with salt {salt}", error=str(e))
+        
+        return None
     
     async def validate_session_token(self, token: str) -> Optional[Dict[str, Any]]:
         """
-        Validate NextAuth.js session token and return user info
+        Validate NextAuth.js session token (JWE format) and return user info
         """
         try:
-            # Decode and validate JWT
-            payload = jose_jwt.decode(
-                token,
-                self.secret,
-                algorithms=[self.algorithm],
-                options={"verify_signature": True, "verify_exp": True}
-            )
+            # Try to decrypt JWE token using multiple approaches
+            payload = self._try_decrypt_jwe(token)
             
-            # Extract user information
+            if not payload:
+                logger.warning("JWE decryption failed with all methods", token_prefix=token[:20])
+                return None
+            
+            # Extract user information from the payload
             user_info = {
                 "user_id": payload.get("sub"),  # Subject (user ID)
                 "email": payload.get("email"),
@@ -51,19 +97,18 @@ class NextAuthValidator:
             
             # Validate required fields
             if not user_info["email"]:
-                raise ValueError("Email not found in token")
+                logger.warning("Email not found in token payload", payload_keys=list(payload.keys()))
+                return None
             
             logger.info("Token validated successfully", 
                        email=user_info["email"], 
-                       provider=user_info["provider"])
+                       provider=user_info["provider"],
+                       payload_keys=list(payload.keys()))
             
             return user_info
             
-        except JWTError as e:
-            logger.warning("JWT validation failed", error=str(e), token_prefix=token[:20] if token else "None")
-            return None
         except Exception as e:
-            logger.error("Token validation error", error=str(e))
+            logger.warning("Token validation failed", error=str(e), token_prefix=token[:20] if token else "None")
             return None
     
     async def validate_api_token(self, authorization_header: str) -> Optional[Dict[str, Any]]:
