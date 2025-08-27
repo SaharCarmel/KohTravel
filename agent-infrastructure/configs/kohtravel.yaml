@@ -4,7 +4,7 @@
 project:
   name: "KohTravel"
   description: "Travel document management and AI assistant"
-  backend_url: "http://localhost:8000/api/agent/tools"
+  backend_url: "${MAIN_API_URL:http://localhost:8000}/api/agent/tools"
 
 agent:
   name: "KohTravel Travel Assistant"

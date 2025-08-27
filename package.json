@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Travel planning and management web application",
   "scripts": {
-    "dev": "concurrently \"cd frontend && PORT=3000 npm run dev\" \"cd api && PORT=8000 uv run --with fastapi --with uvicorn --with python-multipart --with psycopg2-binary --with python-dotenv uvicorn main:app --reload --host 0.0.0.0 --port 8000\" \"./scripts/dev-agent.sh\"",
+    "dev": "concurrently \"cd frontend && PORT=$FRONTEND_PORT npm run dev\" \"cd api && PORT=$API_PORT uv run --with fastapi --with uvicorn --with python-multipart --with psycopg2-binary --with python-dotenv uvicorn main:app --reload --host 0.0.0.0 --port $API_PORT\" \"./scripts/dev-agent.sh\"",
     "dev:frontend": "cd frontend && PORT=3000 npm run dev",
     "dev:api": "cd api && PORT=8000 uv run --with fastapi --with uvicorn --with python-multipart --with psycopg2-binary --with python-dotenv uvicorn main:app --reload --host 0.0.0.0 --port 8000",
     "dev:agent": "./scripts/dev-agent.sh",
@@ -11,7 +11,10 @@
     "build": "cd frontend && npm run build",
     "start": "cd frontend && npm start",
     "deploy": "vercel --prod",
-    "kill-ports": "lsof -ti:3000,8000,8001 | xargs -r kill -9"
+    "kill-ports": "lsof -ti:3000,8000,8001 | xargs -r kill -9",
+    "dev:instance": "./scripts/dev-instance.sh",
+    "kill-instance": "./scripts/kill-instance.sh",
+    "list-instances": "./scripts/list-instances.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

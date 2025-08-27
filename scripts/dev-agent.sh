@@ -32,7 +32,7 @@ uv sync --dev
 export DEBUG=true
 export ENVIRONMENT=development
 export AUTH_ENABLED=false
-export CORS_ORIGINS="http://localhost:3000,http://localhost:8000"
+export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:3000,http://localhost:8000}"
 
 # Load environment variables from .env if they exist
 if [ -f ".env" ]; then
@@ -56,4 +56,4 @@ echo ""
 
 # Start with verbose output to see any errors  
 export PYTHONPATH=.
-exec uv run uvicorn src.server.main:create_app --factory --reload --host 0.0.0.0 --port 8001
+exec uv run uvicorn src.server.main:create_app --factory --reload --host 0.0.0.0 --port ${AGENT_PORT:-8001}

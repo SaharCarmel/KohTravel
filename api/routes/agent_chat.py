@@ -71,7 +71,7 @@ async def stream_chat_with_agent(request: ChatRequest, db: Session = Depends(get
             async with httpx.AsyncClient(timeout=60) as client:
                 async with client.stream(
                     'POST',
-                    "http://localhost:8001/api/agent/chat/stream",
+                    f"{kohtravel_agent_service.agent_infrastructure_url}/api/agent/chat/stream",
                     json={
                         "session_id": request.session_id,
                         "message": request.message,

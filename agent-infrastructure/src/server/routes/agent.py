@@ -68,8 +68,11 @@ async def get_or_create_agent(project: str, user_id: str, system_prompt: Optiona
         system_prompt = "You are a helpful AI assistant."
     
     # Load project-specific tools from external APIs if configured
+    import os
+    api_url = os.getenv('MAIN_API_URL', 'http://localhost:8000')
+    
     external_tools_config = {
-        "kohtravel": "http://localhost:8000/api/agent/tools"
+        "kohtravel": f"{api_url}/api/agent/tools"
         # Add other projects here as needed
     }
     
