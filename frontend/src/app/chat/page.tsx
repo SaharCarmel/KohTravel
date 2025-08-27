@@ -129,7 +129,7 @@ export default function ChatPage() {
       const sessionResponse = await fetch('/api/auth/session')
       const sessionData = await sessionResponse.json()
       
-      const response = await fetch('http://localhost:8001/api/agent/chat/stream', {
+      const response = await fetch('http://localhost:8000/api/agent/chat/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

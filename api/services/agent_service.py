@@ -75,6 +75,9 @@ class KohTravelAgentService:
     ) -> Dict[str, Any]:
         """Send message to agent with KohTravel context"""
         try:
+            # Always ensure agent has latest prompts by reinitializing
+            await self.initialize_agent(user_id)
+            
             async with httpx.AsyncClient(timeout=60) as client:
                 payload = {
                     "session_id": session_id,
