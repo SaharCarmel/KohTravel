@@ -92,7 +92,6 @@ export default function DocumentsPage() {
       for (const cookieName of cookieNames) {
         sessionToken = getCookie(cookieName);
         if (sessionToken) {
-          console.log(`Found NextAuth token in cookie: ${cookieName}`);
           break;
         }
       }
@@ -103,7 +102,7 @@ export default function DocumentsPage() {
           'Content-Type': 'application/json'
         };
       } else {
-        console.log('No NextAuth session token found, using dev_token fallback');
+        // Using dev_token fallback for development
         return {
           'Authorization': 'Bearer dev_token',
           'Content-Type': 'application/json'
@@ -245,14 +244,14 @@ export default function DocumentsPage() {
     });
 
     try {
-      const tempDocs: DocumentStatus[] = files.map((file) => ({
+      const uploadingDocs: DocumentStatus[] = files.map((file) => ({
         id: Math.random().toString(36).substr(2, 9),
         filename: file.name,
         status: 'uploading',
         progress: 0
       }));
       
-      setUploadDocuments(prev => [...prev, ...tempDocs]);
+      setUploadDocuments(prev => [...prev, ...uploadingDocs]);
 
       const authHeaders = getAuthHeaders();
       const response = await fetch('/api/documents/upload/', {
@@ -395,36 +394,38 @@ export default function DocumentsPage() {
 
   if (loading) {
     return (
-      <div className="container mx-auto py-8 px-4">
-        <div className="flex items-center justify-center min-h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-        </div>
+      <div className="full-height flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto py-8 px-4 max-w-7xl">
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Documents</h1>
-        <p className="text-gray-600">
-          Upload, organize and manage your travel documents with AI-powered analysis
-        </p>
+    <div className="min-h-screen bg-slate-50">
+      <div className="sticky-header border-b bg-white px-6 py-4 mobile-padding mobile-compact">
+        {/* Header */}
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">Documents</h1>
+          <p className="text-sm text-gray-600">
+            Upload, organize and manage your travel documents with AI-powered analysis
+          </p>
+        </div>
       </div>
 
-      {/* Always Visible Upload Zone */}
-      <Card className={`upload-zone mb-6 border-2 border-dashed border-gray-300 ${getDropzoneClassName()}`}>
-        <CardContent className="p-8">
+      <div className="px-6 py-4 mobile-padding">
+
+        {/* Always Visible Upload Zone */}
+        <Card className={`upload-zone mb-4 border-2 border-dashed border-gray-300 ${getDropzoneClassName()}`}>
+          <CardContent className="p-6">
           <div {...getRootProps()} className="text-center">
             <input {...getInputProps()} disabled={isUploading} />
-            <Upload className={`h-16 w-16 mx-auto mb-4 transition-colors ${
+            <Upload className={`h-12 w-12 mx-auto mb-3 transition-colors ${
               isDragActive ? 'text-blue-500' : 'text-gray-400'
             }`} />
             
             {isDragActive ? (
               <div>
-                <p className="text-xl font-medium text-blue-600 mb-2">
+                <p className="text-lg font-medium text-blue-600 mb-1">
                   {isDragAccept ? 'Drop files here...' : 'Some files not supported'}
                 </p>
                 <p className="text-sm text-gray-500">
@@ -433,53 +434,50 @@ export default function DocumentsPage() {
               </div>
             ) : (
               <div>
-                <p className="text-xl font-medium text-gray-900 mb-2">
+                <p className="text-lg font-medium text-gray-900 mb-2">
                   Drag & drop files here, or click to select
                 </p>
-                <p className="text-sm text-gray-500 mb-2">
+                <p className="text-sm text-gray-500 mb-1">
                   Supports: <span className="font-medium">PDF, DOC, DOCX, JPG, PNG</span> • Max: <span className="font-medium">10MB per file</span>
-                </p>
-                <p className="text-xs text-gray-400">
-                  AI will automatically categorize and extract key information from your documents
                 </p>
               </div>
             )}
             
             {isUploading && (
-              <div className="mt-4">
-                <div className="inline-flex items-center px-4 py-2 bg-blue-50 text-blue-700 rounded-lg">
+              <div className="mt-3">
+                <div className="inline-flex items-center px-3 py-1 bg-blue-50 text-blue-700 rounded text-sm">
                   <Clock className="h-4 w-4 mr-2 animate-spin" />
                   Uploading files...
                 </div>
               </div>
             )}
           </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      {/* Processing Section - Collapsible */}
-      {uploadDocuments.length > 0 && (
-        <Card className="mb-6">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center text-lg">
-                <Clock className="h-5 w-5 mr-2 text-blue-500" />
-                Processing Documents ({uploadDocuments.filter(d => d.status === 'processing' || d.status === 'uploading').length})
-              </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowProcessing(!showProcessing)}
-              >
-                {showProcessing ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </Button>
-            </div>
-          </CardHeader>
-          {showProcessing && (
-            <CardContent className="pt-0">
-              <div className="space-y-3">
-                {uploadDocuments.map((doc) => (
-                  <div key={doc.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border">
+        {/* Processing Section - Collapsible */}
+        {uploadDocuments.length > 0 && (
+          <Card className="mb-4">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center text-base">
+                  <Clock className="h-4 w-4 mr-2 text-blue-500" />
+                  Processing ({uploadDocuments.filter(d => d.status === 'processing' || d.status === 'uploading').length})
+                </CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowProcessing(!showProcessing)}
+                >
+                  {showProcessing ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            {showProcessing && (
+              <CardContent className="pt-0">
+                <div className="space-y-2">
+                  {uploadDocuments.map((doc) => (
+                    <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded border">
                     <div className="flex items-center space-x-3">
                       {getUploadStatusIcon(doc.status)}
                       <div>
@@ -521,9 +519,9 @@ export default function DocumentsPage() {
         </Card>
       )}
 
-      {/* Filters and Search */}
-      <Card className="mb-6">
-        <CardContent className="p-6">
+        {/* Filters and Search */}
+        <Card className="mb-4">
+          <CardContent className="p-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {/* Search */}
             <div className="relative">
@@ -580,36 +578,35 @@ export default function DocumentsPage() {
                 <SelectItem value="status">Status</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Documents Grid */}
-      {filteredDocuments.length === 0 ? (
-        <Card>
-          <CardContent className="p-12 text-center">
-            <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-600 mb-2">No documents found</h3>
-            <p className="text-gray-500 mb-6">
-              {documents.length === 0 
-                ? "Upload your first travel document to get started"
-                : "Try adjusting your search or filters"
-              }
-            </p>
-            {documents.length === 0 && (
-              <Button onClick={() => {
-                // Scroll to upload section
-                const uploadSection = document.querySelector('.upload-zone');
-                uploadSection?.scrollIntoView({ behavior: 'smooth' });
-              }}>
-                <Upload className="h-4 w-4 mr-2" />
-                Upload Your First Document
-              </Button>
-            )}
+            </div>
           </CardContent>
         </Card>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+        {/* Documents Grid */}
+        {filteredDocuments.length === 0 ? (
+          <Card>
+            <CardContent className="p-8 text-center">
+              <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+              <h3 className="text-lg font-semibold text-gray-600 mb-2">No documents found</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                {documents.length === 0 
+                  ? "Upload your first travel document to get started"
+                  : "Try adjusting your search or filters"
+                }
+              </p>
+              {documents.length === 0 && (
+                <Button onClick={() => {
+                  const uploadSection = document.querySelector('.upload-zone');
+                  uploadSection?.scrollIntoView({ behavior: 'smooth' });
+                }}>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Your First Document
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredDocuments.map(document => (
             <Card key={document.id} className="hover:shadow-lg transition-shadow cursor-pointer">
               <CardHeader className="pb-3">
@@ -684,15 +681,16 @@ export default function DocumentsPage() {
               </CardContent>
             </Card>
           ))}
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* Summary Stats */}
-      {documents.length > 0 && (
-        <div className="mt-8 text-center text-sm text-gray-500">
-          Showing {filteredDocuments.length} of {documents.length} documents
-        </div>
-      )}
+        {/* Summary Stats */}
+        {documents.length > 0 && (
+          <div className="mt-4 text-center text-sm text-gray-500">
+            Showing {filteredDocuments.length} of {documents.length} documents
+          </div>
+        )}
+      </div>
     </div>
   );
 }

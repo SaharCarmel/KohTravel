@@ -18,11 +18,11 @@ export default function Navigation() {
   ]
 
   return (
-    <header className="border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60 sticky top-0 z-50">
-      <div className="container mx-auto px-4 py-3">
+    <header className="sticky-header border-b">
+      <div className="container mx-auto px-4 py-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-6">
-            <Link href="/" className="text-xl font-bold text-primary">
+          <div className="flex items-center space-x-4">
+            <Link href="/" className="text-lg font-bold text-primary">
               KohTravel
             </Link>
             
@@ -37,10 +37,10 @@ export default function Navigation() {
                       variant={isActive ? "default" : "ghost"}
                       size="sm"
                       disabled={item.disabled}
-                      className="flex items-center gap-2"
+                      className="flex items-center gap-2 h-8 px-2"
                     >
-                      <Icon className="h-4 w-4" />
-                      {item.label}
+                      <Icon className="h-3 w-3" />
+                      <span className="text-sm">{item.label}</span>
                     </Button>
                   </Link>
                 )
@@ -54,7 +54,7 @@ export default function Navigation() {
         </div>
 
         {/* Mobile Navigation */}
-        <nav className="md:hidden mt-3 flex items-center space-x-1 overflow-x-auto">
+        <nav className="md:hidden mt-2 flex items-center space-x-1 overflow-x-auto">
           {navItems.map((item) => {
             const Icon = item.icon
             const isActive = pathname === item.href
@@ -65,10 +65,10 @@ export default function Navigation() {
                   variant={isActive ? "default" : "ghost"}
                   size="sm"
                   disabled={item.disabled}
-                  className="flex items-center gap-1 whitespace-nowrap"
+                  className="flex items-center gap-1 whitespace-nowrap h-8 px-2"
                 >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
+                  <Icon className="h-3 w-3" />
+                  <span className="text-sm">{item.label}</span>
                 </Button>
               </Link>
             )

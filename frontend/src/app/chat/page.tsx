@@ -251,7 +251,7 @@ export default function ChatPage() {
 
   if (status === 'loading') {
     return (
-      <div className="h-screen flex items-center justify-center">
+      <div className="fixed inset-x-0 bottom-0 bg-slate-50 flex items-center justify-center" style={{top: 'var(--header-height, 60px)'}}>
         <div className="text-center space-y-4">
           <Loader2 className="h-8 w-8 animate-spin mx-auto text-slate-600" />
           <p className="text-slate-600">Loading...</p>
@@ -262,7 +262,7 @@ export default function ChatPage() {
 
   if (status === 'unauthenticated') {
     return (
-      <div className="h-screen flex items-center justify-center">
+      <div className="fixed inset-x-0 bottom-0 bg-slate-50 flex items-center justify-center" style={{top: 'var(--header-height, 60px)'}}>
         <div className="max-w-sm w-full space-y-6 text-center p-6">
           <div className="space-y-4">
             <Bot className="h-16 w-16 mx-auto text-slate-600" />
@@ -287,48 +287,63 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-slate-50">
+    <div className="fixed inset-x-0 top-0 bottom-0 bg-slate-50 flex flex-col" style={{top: 'var(--header-height, 60px)'}}>
       {/* Header - Fixed */}
-      <header className="flex-none border-b bg-white px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-slate-900 flex items-center justify-center">
-              <Bot className="h-5 w-5 text-white" />
+      <header className="flex-shrink-0 border-b bg-white/95 backdrop-blur-sm">
+        <div className="px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-900 to-slate-700 flex items-center justify-center shadow-sm">
+                <Bot className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold text-slate-900">Travel Assistant</h1>
+                <div className="flex items-center gap-2 mt-1">
+                  <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  <span className="text-sm text-slate-600">
+                    {isConnected ? "Online" : "Offline"}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-semibold text-slate-900">Travel Assistant</h1>
-              <Badge variant={isConnected ? "default" : "destructive"} className="text-xs">
-                {isConnected ? "Online" : "Offline"}
-              </Badge>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2">
+            
             {messages.length > 0 && (
-              <Button variant="ghost" size="sm" onClick={copyConversation}>
-                {copied ? (
-                  <>
-                    <CheckCheck className="h-4 w-4" />
-                    <span className="ml-2">Copied</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-4 w-4" />
-                    <span className="ml-2">Copy Chat</span>
-                  </>
-                )}
-              </Button>
+              <div className="flex items-center gap-3">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={copyConversation}
+                  className="hover:bg-slate-50 border-slate-200"
+                >
+                  {copied ? (
+                    <>
+                      <CheckCheck className="h-4 w-4 text-green-600" />
+                      <span className="ml-2 text-green-600">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4" />
+                      <span className="ml-2">Copy</span>
+                    </>
+                  )}
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={clearChat}
+                  className="hover:bg-red-50 border-slate-200 hover:border-red-200 hover:text-red-600"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span className="ml-2">Clear</span>
+                </Button>
+              </div>
             )}
-            <Button variant="ghost" size="sm" onClick={clearChat}>
-              <Trash2 className="h-4 w-4" />
-              <span className="ml-2">Clear</span>
-            </Button>
           </div>
         </div>
       </header>
 
       {/* Messages - Scrollable */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
         {messages.length === 0 ? (
           <div className="h-full flex items-center justify-center p-8">
             <div className="max-w-3xl w-full text-center">
@@ -445,7 +460,7 @@ export default function ChatPage() {
       </div>
 
       {/* Input Area - Fixed */}
-      <footer className="flex-none border-t bg-white p-4">
+      <footer className="flex-shrink-0 border-t bg-white p-4">
         <div className="flex items-center gap-3 max-w-3xl mx-auto">
           <Input
             value={input}

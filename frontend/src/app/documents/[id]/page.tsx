@@ -202,22 +202,20 @@ export default function DocumentViewerPage() {
 
   if (loading) {
     return (
-      <div className="container mx-auto py-8 px-4">
-        <div className="flex items-center justify-center min-h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-        </div>
+      <div className="h-full flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   if (!document) {
     return (
-      <div className="container mx-auto py-8 px-4">
+      <div className="h-full flex items-center justify-center p-6">
         <Card>
           <CardContent className="p-8 text-center">
-            <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-600 mb-2">Document not found</h3>
-            <p className="text-gray-500 mb-4">The document you're looking for doesn't exist.</p>
+            <FileText className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-600 mb-2">Document not found</h3>
+            <p className="text-sm text-gray-500 mb-4">The document you're looking for doesn't exist.</p>
             <Link href="/documents">
               <Button>Back to Documents</Button>
             </Link>
@@ -228,190 +226,195 @@ export default function DocumentViewerPage() {
   }
 
   return (
-    <div className="container mx-auto py-8 px-4 max-w-6xl">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-4">
-          <Link href="/documents">
-            <Button variant="ghost" size="sm">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Documents
+    <div className="h-full flex flex-col bg-slate-50">
+      <div className="flex-shrink-0 px-6 py-3 bg-white border-b">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            <Link href="/documents">
+              <Button variant="ghost" size="sm">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Documents
+              </Button>
+            </Link>
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            <Button variant="outline" size="sm">
+              <Edit className="h-4 w-4 mr-2" />
+              Edit
             </Button>
-          </Link>
-        </div>
-        
-        <div className="flex items-center space-x-2">
-          <Button variant="outline" size="sm">
-            <Edit className="h-4 w-4 mr-2" />
-            Edit
-          </Button>
-          <Button variant="outline" size="sm">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Reprocess
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={handleDelete}
-            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-          >
-            <Trash2 className="h-4 w-4 mr-2" />
-            Delete
-          </Button>
+            <Button variant="outline" size="sm">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Reprocess
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleDelete}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Document Header */}
-      <Card className="mb-6">
-        <CardHeader>
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between">
-            <div className="flex-1">
-              <CardTitle className="text-2xl font-bold text-gray-900 mb-2">
-                {document.title}
-              </CardTitle>
-              <p className="text-gray-600 mb-4">
-                {document.original_filename}
-              </p>
-              
-              <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
-                <div className="flex items-center">
-                  <Tag className="h-4 w-4 mr-1" />
-                  {getCategoryName(document.category_id)}
-                </div>
-                <div className="flex items-center">
-                  <Calendar className="h-4 w-4 mr-1" />
-                  {formatDate(document.created_at)}
-                </div>
-                <div className="flex items-center">
-                  <Clock className="h-4 w-4 mr-1" />
-                  Updated {formatDate(document.updated_at)}
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex flex-col items-end space-y-2 mt-4 md:mt-0">
-              <Badge className={getStatusColor(document.processing_status)}>
-                {document.processing_status}
-              </Badge>
-              {document.confidence_score && (
-                <span className="text-sm text-gray-500">
-                  {Math.round(document.confidence_score * 100)}% confidence
-                </span>
-              )}
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
+      <div className="flex-1 min-h-0 scrollable-content px-6 py-4">
 
-      {/* Quick References */}
-      {document.quick_refs && document.quick_refs.length > 0 && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-lg">Quick References</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {document.quick_refs.map((ref, index) => (
-                <div key={index} className="flex items-center p-3 bg-gray-50 rounded-lg">
-                  {renderQuickRefIcon(ref.field_type)}
-                  <div className="ml-3">
-                    <p className="text-xs text-gray-500 uppercase tracking-wide">
-                      {ref.field_name.replace(/_/g, ' ')}
-                    </p>
-                    <p className="text-sm font-medium text-gray-900">
-                      {ref.field_value || 'Not available'}
-                    </p>
+        {/* Document Header */}
+        <Card className="mb-4">
+          <CardHeader className="pb-3">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between">
+              <div className="flex-1">
+                <CardTitle className="text-xl font-bold text-gray-900 mb-2">
+                  {document.title}
+                </CardTitle>
+                <p className="text-sm text-gray-600 mb-3">
+                  {document.original_filename}
+                </p>
+                
+                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                  <div className="flex items-center">
+                    <Tag className="h-3 w-3 mr-1" />
+                    {getCategoryName(document.category_id)}
+                  </div>
+                  <div className="flex items-center">
+                    <Calendar className="h-3 w-3 mr-1" />
+                    {formatDate(document.created_at)}
+                  </div>
+                  <div className="flex items-center">
+                    <Clock className="h-3 w-3 mr-1" />
+                    Updated {formatDate(document.updated_at)}
                   </div>
                 </div>
+              </div>
+              
+              <div className="flex flex-col items-end space-y-2 mt-3 md:mt-0">
+                <Badge className={getStatusColor(document.processing_status)}>
+                  {document.processing_status}
+                </Badge>
+                {document.confidence_score && (
+                  <span className="text-xs text-gray-500">
+                    {Math.round(document.confidence_score * 100)}% confidence
+                  </span>
+                )}
+              </div>
+            </div>
+          </CardHeader>
+        </Card>
+
+        {/* Quick References */}
+        {document.quick_refs && document.quick_refs.length > 0 && (
+          <Card className="mb-4">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Quick References</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                {document.quick_refs.map((ref, index) => (
+                  <div key={index} className="flex items-center p-3 bg-gray-50 rounded border">
+                    {renderQuickRefIcon(ref.field_type)}
+                    <div className="ml-2">
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">
+                        {ref.field_name.replace(/_/g, ' ')}
+                      </p>
+                      <p className="text-sm font-medium text-gray-900">
+                        {ref.field_value || 'Not available'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Content Tabs */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex space-x-1">
+              {[
+                { id: 'overview', label: 'Overview' },
+                { id: 'structured', label: 'Structured Data' },
+                { id: 'raw_text', label: 'Raw Text' }
+              ].map(tab => (
+                <Button
+                  key={tab.id}
+                  variant={activeTab === tab.id ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                >
+                  {tab.label}
+                </Button>
               ))}
             </div>
+          </CardHeader>
+          
+          <CardContent className="pt-0">
+            {activeTab === 'overview' && (
+              <div className="space-y-4">
+                {/* Summary */}
+                {document.summary && (
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-900 mb-2">Summary</h3>
+                    <p className="text-sm text-gray-700 leading-relaxed bg-blue-50 p-3 rounded">
+                      {document.summary}
+                    </p>
+                  </div>
+                )}
+
+                {/* Error Message */}
+                {document.error_message && (
+                  <div>
+                    <h3 className="text-base font-semibold text-red-900 mb-2">Processing Error</h3>
+                    <p className="text-sm text-red-700 bg-red-50 p-3 rounded">
+                      {document.error_message}
+                    </p>
+                  </div>
+                )}
+
+                {/* Key Information */}
+                {document.structured_data && Object.keys(document.structured_data).length > 0 && (
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-900 mb-2">Key Information</h3>
+                    {renderStructuredData(document.structured_data)}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'structured' && (
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 mb-3">Structured Data</h3>
+                {document.structured_data && Object.keys(document.structured_data).length > 0 ? (
+                  <pre className="bg-gray-50 p-3 rounded overflow-x-auto text-xs">
+                    {JSON.stringify(document.structured_data, null, 2)}
+                  </pre>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">No structured data available</p>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'raw_text' && (
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 mb-3">Raw Extracted Text</h3>
+                {document.raw_text ? (
+                  <div className="bg-gray-50 p-3 rounded max-h-80 overflow-y-auto">
+                    <pre className="whitespace-pre-wrap text-xs text-gray-700">
+                      {document.raw_text}
+                    </pre>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">No raw text available</p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
-      )}
-
-      {/* Content Tabs */}
-      <Card>
-        <CardHeader>
-          <div className="flex space-x-1">
-            {[
-              { id: 'overview', label: 'Overview' },
-              { id: 'structured', label: 'Structured Data' },
-              { id: 'raw_text', label: 'Raw Text' }
-            ].map(tab => (
-              <Button
-                key={tab.id}
-                variant={activeTab === tab.id ? 'default' : 'ghost'}
-                size="sm"
-                onClick={() => setActiveTab(tab.id as typeof activeTab)}
-              >
-                {tab.label}
-              </Button>
-            ))}
-          </div>
-        </CardHeader>
-        
-        <CardContent>
-          {activeTab === 'overview' && (
-            <div className="space-y-6">
-              {/* Summary */}
-              {document.summary && (
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Summary</h3>
-                  <p className="text-gray-700 leading-relaxed bg-blue-50 p-4 rounded-lg">
-                    {document.summary}
-                  </p>
-                </div>
-              )}
-
-              {/* Error Message */}
-              {document.error_message && (
-                <div>
-                  <h3 className="text-lg font-semibold text-red-900 mb-3">Processing Error</h3>
-                  <p className="text-red-700 bg-red-50 p-4 rounded-lg">
-                    {document.error_message}
-                  </p>
-                </div>
-              )}
-
-              {/* Key Information */}
-              {document.structured_data && Object.keys(document.structured_data).length > 0 && (
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Key Information</h3>
-                  {renderStructuredData(document.structured_data)}
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'structured' && (
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Structured Data</h3>
-              {document.structured_data && Object.keys(document.structured_data).length > 0 ? (
-                <pre className="bg-gray-50 p-4 rounded-lg overflow-x-auto text-sm">
-                  {JSON.stringify(document.structured_data, null, 2)}
-                </pre>
-              ) : (
-                <p className="text-gray-500 italic">No structured data available</p>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'raw_text' && (
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Raw Extracted Text</h3>
-              {document.raw_text ? (
-                <div className="bg-gray-50 p-4 rounded-lg max-h-96 overflow-y-auto">
-                  <pre className="whitespace-pre-wrap text-sm text-gray-700">
-                    {document.raw_text}
-                  </pre>
-                </div>
-              ) : (
-                <p className="text-gray-500 italic">No raw text available</p>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      </div>
     </div>
   );
 }

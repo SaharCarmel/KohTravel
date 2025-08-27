@@ -2,11 +2,12 @@
 Core Agent class for managing AI conversations and tool execution
 """
 from typing import Dict, List, Any, Optional, AsyncGenerator, Callable
-import asyncio
+import time
 import structlog
 from pydantic import BaseModel
 
 from src.core.conversation import Conversation, Message, MessageRole
+from src.core.logging_config import agent_logger
 from src.core.streaming import StreamingResponse
 from src.providers.base import BaseProvider
 from src.tools.base import Tool, ToolResult
@@ -92,7 +93,11 @@ class Agent:
         """
         Send a message to the agent and get streaming response
         """
+        start_time = time.time()
         conversation = self.get_conversation(session_id)
+        
+        # Log conversation start
+        agent_logger.conversation_started(session_id, len(message))
         
         # Add user message to conversation
         conversation.add_message(Message(
@@ -113,17 +118,28 @@ class Agent:
         
         # Stream response from provider - provider handles complete tool execution flow
         final_response_content = ""
+        tool_calls_count = 0
+        
         async for chunk in self.provider.stream_completion(
             messages=messages,
             model=self.config.model,
             max_tokens=self.config.max_tokens,
             temperature=self.config.temperature,
             tools=provider_tools,
-            context=full_context  # Pass context for tool execution
+            context=full_context,  # Pass context for tool execution
+            session_id=session_id  # Pass session_id for logging
         ):
             # Track content for conversation history
             if chunk.type == "content":
                 final_response_content += chunk.data.get("content", "")
+            elif chunk.type == "tool_call":
+                tool_calls_count += 1
+            elif chunk.type == "error":
+                agent_logger.error_occurred(
+                    session_id,
+                    "streaming_error", 
+                    chunk.data.get("error", "Unknown error")
+                )
             
             # Pass through all responses
             yield chunk
@@ -134,6 +150,16 @@ class Agent:
                 role=MessageRole.ASSISTANT,
                 content=final_response_content
             ))
+        
+        # Log conversation completion
+        total_duration_ms = int((time.time() - start_time) * 1000)
+        agent_logger.conversation_completed(
+            session_id=session_id,
+            turn_count=len(conversation.messages),
+            total_duration_ms=total_duration_ms,
+            tool_calls_count=tool_calls_count,
+            success=True
+        )
     
     def _build_messages_with_context(
         self, 

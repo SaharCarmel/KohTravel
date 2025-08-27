@@ -12,7 +12,7 @@ function SignInContent() {
   const error = searchParams.get('error')
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
+    <div className="full-height flex items-center justify-center p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">Sign in to KohTravel</CardTitle>

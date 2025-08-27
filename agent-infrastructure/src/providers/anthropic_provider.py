@@ -1,7 +1,7 @@
 """
 Anthropic provider implementation for Claude models
 """
-import json
+import time
 from typing import List, Dict, Any, Optional, AsyncGenerator
 import anthropic
 from anthropic.types import MessageParam, ToolParam
@@ -9,6 +9,7 @@ import structlog
 
 from src.providers.base import BaseProvider, ProviderConfig
 from src.core.streaming import StreamingResponse, ContentChunk, ToolCallChunk, ToolResultChunk, DoneChunk, ErrorChunk
+from src.core.logging_config import tool_logger
 from src.tools.base import Tool, ToolResult
 
 logger = structlog.get_logger(__name__)
@@ -202,27 +203,60 @@ class AnthropicProvider(BaseProvider):
         async def execute_single_tool(tool_call: Dict[str, Any]) -> ToolResult:
             tool_name = tool_call["name"] 
             tool_input = tool_call["input"]
+            call_id = tool_call["id"]
+            session_id = context.get("session_id", "unknown")
+            
+            start_time = time.time()
+            
+            # Log tool execution start
+            tool_logger.tool_called(session_id, tool_name, tool_input, call_id)
             
             if tool_name not in self.tools:
+                error_msg = f"Tool '{tool_name}' not available"
+                tool_logger.tool_completed(session_id, tool_name, call_id, False, 0, 0, error_msg)
                 return ToolResult(
                     success=False,
-                    content=f"Tool '{tool_name}' not available",
+                    content=error_msg,
                     error="tool_not_found"
                 )
             
             tool = self.tools[tool_name]
             
             try:
-                logger.info("Executing tool", tool=tool_name, input=tool_input)
                 result = await tool.safe_execute(tool_input, context)
-                logger.info("Tool completed", tool=tool_name, success=result.success)
+                duration_ms = int((time.time() - start_time) * 1000)
+                
+                # Log tool completion
+                tool_logger.tool_completed(
+                    session_id=session_id,
+                    tool_name=tool_name, 
+                    call_id=call_id,
+                    success=result.success,
+                    duration_ms=duration_ms,
+                    result_length=len(str(result.content)),
+                    error=result.error if not result.success else None
+                )
+                
+                # Log performance warning if slow
+                if duration_ms > 5000:  # 5 seconds threshold
+                    tool_logger.performance_warning(
+                        f"tool_{tool_name}", 
+                        duration_ms, 
+                        5000,
+                        {"session_id": session_id, "call_id": call_id}
+                    )
+                
                 return result
                 
             except Exception as e:
-                logger.error("Tool execution error", tool=tool_name, error=str(e))
+                duration_ms = int((time.time() - start_time) * 1000)
+                error_msg = f"Tool execution failed: {str(e)}"
+                
+                tool_logger.tool_completed(session_id, tool_name, call_id, False, duration_ms, 0, error_msg)
+                
                 return ToolResult(
                     success=False,
-                    content=f"Tool execution failed: {str(e)}",
+                    content=error_msg,
                     error=str(e)
                 )
         
@@ -326,9 +360,3 @@ class AnthropicProvider(BaseProvider):
             "input_schema": tool.get_parameters_schema()
         }
     
-    def _extract_system_message(self, messages: List[Dict[str, Any]]) -> Optional[str]:
-        """Extract system message from message list"""
-        for msg in messages:
-            if msg["role"] == "system":
-                return msg["content"]
-        return None

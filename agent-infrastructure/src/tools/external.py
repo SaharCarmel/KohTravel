@@ -2,10 +2,12 @@
 External tool system for calling project-specific APIs
 """
 import httpx
+import time
 from typing import Dict, Any, Optional, List
 import structlog
 
 from src.tools.base import Tool, ToolResult
+from src.core.logging_config import tool_logger
 
 logger = structlog.get_logger(__name__)
 
@@ -49,6 +51,9 @@ class ExternalTool(Tool):
     ) -> ToolResult:
         """Execute external tool via HTTP call"""
         
+        start_time = time.time()
+        session_id = context.get("session_id", "unknown") if context else "unknown"
+        
         try:
             # Prepare request payload
             payload = {
@@ -74,6 +79,17 @@ class ExternalTool(Tool):
                 
                 response.raise_for_status()
                 result_data = response.json()
+                duration_ms = int((time.time() - start_time) * 1000)
+                
+                # Log search-specific operations
+                if self.name == "search_documents" and parameters.get("query"):
+                    results_count = result_data.get("metadata", {}).get("count", 0)
+                    tool_logger.search_executed(
+                        session_id=session_id,
+                        query=parameters["query"],
+                        results_count=results_count,
+                        duration_ms=duration_ms
+                    )
                 
                 # Handle response format
                 if isinstance(result_data, dict) and "success" in result_data:
@@ -93,11 +109,13 @@ class ExternalTool(Tool):
                     )
                 
         except httpx.HTTPError as e:
+            duration_ms = int((time.time() - start_time) * 1000)
             logger.error(
                 "External tool HTTP error",
                 tool=self.name,
                 error=str(e),
-                endpoint=self.endpoint_url
+                endpoint=self.endpoint_url,
+                duration_ms=duration_ms
             )
             return ToolResult(
                 success=False,
@@ -106,11 +124,13 @@ class ExternalTool(Tool):
             )
             
         except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
             logger.error(
                 "External tool execution error",
                 tool=self.name,
                 error=str(e),
-                endpoint=self.endpoint_url
+                endpoint=self.endpoint_url,
+                duration_ms=duration_ms
             )
             return ToolResult(
                 success=False,

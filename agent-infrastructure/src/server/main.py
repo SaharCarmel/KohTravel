@@ -1,12 +1,11 @@
 """
 Main FastAPI application for agent infrastructure
 """
-import os
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 import structlog
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.server.routes.agent import router as agent_router
@@ -16,6 +15,7 @@ from src.server.routes.cleanup import router as cleanup_router
 from src.server.middleware.auth import AuthMiddleware
 from src.server.middleware.logging import LoggingMiddleware
 from src.config.settings import get_settings
+from src.core.logging_config import configure_logging
 
 logger = structlog.get_logger(__name__)
 
@@ -28,6 +28,15 @@ async def lifespan(app: FastAPI):
     """Application lifespan events"""
     # Startup
     settings = get_settings()
+    
+    # Configure production logging
+    configure_logging(
+        log_level=settings.log_level,
+        log_dir="logs",
+        enable_json=True,
+        enable_file_rotation=True
+    )
+    
     logger.info("Starting agent infrastructure server", version="0.1.0")
     
     # Store settings in app state

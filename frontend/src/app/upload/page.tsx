@@ -34,15 +34,15 @@ export default function UploadPage() {
       formData.append('files', file);
     });
 
-    // Add temporary documents to state
-    const tempDocs: DocumentStatus[] = files.map((file) => ({
+    // Add uploading documents to state
+    const uploadingDocs: DocumentStatus[] = files.map((file) => ({
       id: Math.random().toString(36).substr(2, 9),
       filename: file.name,
       status: 'uploading',
       progress: 0
     }));
     
-    setDocuments(prev => [...prev, ...tempDocs]);
+    setDocuments(prev => [...prev, ...uploadingDocs]);
 
     try {
 
@@ -86,9 +86,9 @@ export default function UploadPage() {
     } catch (error) {
       console.error('Upload error:', error);
       
-      // Mark all temp documents as failed
+      // Mark all uploading documents as failed
       setDocuments(prev => prev.map(doc => 
-        tempDocs.some(temp => temp.filename === doc.filename) 
+        uploadingDocs.some(uploadingDoc => uploadingDoc.filename === doc.filename) 
           ? { ...doc, status: 'failed', error: 'Upload failed' }
           : doc
       ));
@@ -168,116 +168,118 @@ export default function UploadPage() {
   };
 
   return (
-    <div className="container mx-auto py-8 px-4 max-w-6xl">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+    <div className="h-full flex flex-col bg-slate-50">
+      <div className="flex-shrink-0 px-6 py-4 bg-white border-b">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">
           Document Upload
         </h1>
-        <p className="text-gray-600">
+        <p className="text-sm text-gray-600">
           Upload your travel documents for AI-powered organization and analysis.
         </p>
       </div>
 
-      {/* Upload Component */}
-      <div className="mb-8">
-        <FileUpload 
-          onUpload={handleUpload}
-          maxSize={4.5 * 1024 * 1024} // 4.5MB
-          accept={{ 'application/pdf': ['.pdf'] }}
-        />
-      </div>
+      <div className="flex-1 min-h-0 scrollable-content px-6 py-4">
 
-      {/* Document Status List */}
-      {documents.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <FileText className="h-5 w-5" />
-              <span>Upload Status ({documents.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {documents.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="flex items-start justify-between p-4 bg-gray-50 rounded-lg"
-                >
-                  <div className="flex items-start space-x-3 flex-1">
-                    {getStatusIcon(doc.status)}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {doc.filename}
-                      </p>
-                      <p className="text-xs text-gray-500 mb-2">
-                        {getStatusText(doc.status)}
-                      </p>
-                      
-                      {doc.error && (
-                        <p className="text-xs text-red-600 mb-2">
-                          Error: {doc.error}
+        {/* Upload Component */}
+        <div className="mb-6">
+          <FileUpload 
+            onUpload={handleUpload}
+            maxSize={4.5 * 1024 * 1024} // 4.5MB
+            accept={{ 'application/pdf': ['.pdf'] }}
+          />
+        </div>
+
+        {/* Document Status List */}
+        {documents.length > 0 && (
+          <Card className="mb-6">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center space-x-2 text-base">
+                <FileText className="h-4 w-4" />
+                <span>Upload Status ({documents.length})</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="space-y-3">
+                {documents.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="flex items-start justify-between p-3 bg-gray-50 rounded border"
+                  >
+                    <div className="flex items-start space-x-3 flex-1">
+                      {getStatusIcon(doc.status)}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {doc.filename}
                         </p>
-                      )}
-                      
-                      {doc.message && doc.status === 'duplicate' && (
-                        <p className="text-xs text-yellow-600 mb-2">
-                          {doc.message}
+                        <p className="text-xs text-gray-500 mb-1">
+                          {getStatusText(doc.status)}
                         </p>
-                      )}
-                      
-                      {doc.summary && (
-                        <div className="text-xs text-gray-700 bg-white p-3 rounded border space-y-2">
-                          <p><strong>Summary:</strong> {doc.summary}</p>
-                          {/* Add structured data display */}
-                          <div className="grid grid-cols-2 gap-2 pt-2 border-t">
-                            <div><strong>Status:</strong> Processing completed</div>
-                            <div><strong>Category:</strong> Transport Document</div>
+                        
+                        {doc.error && (
+                          <p className="text-xs text-red-600 mb-1">
+                            Error: {doc.error}
+                          </p>
+                        )}
+                        
+                        {doc.message && doc.status === 'duplicate' && (
+                          <p className="text-xs text-yellow-600 mb-1">
+                            {doc.message}
+                          </p>
+                        )}
+                        
+                        {doc.summary && (
+                          <div className="text-xs text-gray-700 bg-white p-2 rounded border space-y-1">
+                            <p><strong>Summary:</strong> {doc.summary}</p>
+                            <div className="grid grid-cols-2 gap-2 pt-1 border-t">
+                              <div><strong>Status:</strong> Processing completed</div>
+                              <div><strong>Category:</strong> Transport Document</div>
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
+                    
+                    {doc.status === 'completed' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          // Navigate to document view
+                          window.location.href = `/documents/${doc.id}`;
+                        }}
+                      >
+                        View
+                      </Button>
+                    )}
                   </div>
-                  
-                  {doc.status === 'completed' && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        // Navigate to document view - implement later
-                        console.log('View document:', doc.id);
-                      }}
-                    >
-                      View
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Development Info */}
+        <Card className="bg-blue-50 border-blue-200">
+          <CardContent className="pt-4">
+            <h3 className="text-sm font-medium text-blue-900 mb-2">
+              🚧 Development Mode
+            </h3>
+            <p className="text-xs text-blue-800">
+              This is Phase 2 implementation. Features included:
+            </p>
+            <ul className="text-xs text-blue-800 mt-2 space-y-1 list-disc list-inside">
+              <li>Drag & drop file upload (PDF only, 4.5MB max)</li>
+              <li>File validation and error handling</li>
+              <li>Background document processing with Docling</li>
+              <li>AI-powered classification and extraction with Claude</li>
+              <li>Real-time status updates</li>
+            </ul>
+            <p className="text-xs text-blue-600 mt-3">
+              <strong>Note:</strong> Set ANTHROPIC_API_KEY in your environment for AI features.
+            </p>
           </CardContent>
         </Card>
-      )}
-
-      {/* Development Info */}
-      <Card className="mt-8 bg-blue-50 border-blue-200">
-        <CardContent className="pt-6">
-          <h3 className="text-sm font-medium text-blue-900 mb-2">
-            🚧 Development Mode
-          </h3>
-          <p className="text-xs text-blue-800">
-            This is Phase 2 implementation. Features included:
-          </p>
-          <ul className="text-xs text-blue-800 mt-2 space-y-1 list-disc list-inside">
-            <li>Drag & drop file upload (PDF only, 4.5MB max)</li>
-            <li>File validation and error handling</li>
-            <li>Background document processing with Docling</li>
-            <li>AI-powered classification and extraction with Claude</li>
-            <li>Real-time status updates</li>
-          </ul>
-          <p className="text-xs text-blue-600 mt-3">
-            <strong>Note:</strong> Set ANTHROPIC_API_KEY in your environment for AI features.
-          </p>
-        </CardContent>
-      </Card>
+      </div>
     </div>
   );
 }
