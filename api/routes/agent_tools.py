@@ -372,6 +372,55 @@ async def get_travel_summary(request: ToolRequest, db: Session = Depends(get_db)
         )
 
 
+@router.post("/get_document_categories", response_model=ToolResponse)
+async def get_document_categories(request: ToolRequest, db: Session = Depends(get_db)):
+    """
+    Get all available document categories to guide search strategy
+    """
+    try:
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User authentication failed",
+                error="auth_failed"
+            )
+        
+        # Get categories with document counts for this user
+        from sqlalchemy import func
+        categories = db.query(
+            DocumentCategory.name,
+            func.count(Document.id).label("count")
+        ).outerjoin(
+            Document, (Document.category_id == DocumentCategory.id) & (Document.user_id == user_uuid)
+        ).group_by(DocumentCategory.name).all()
+        
+        # Format response
+        category_list = []
+        for cat in categories:
+            if cat.count > 0:  # Only show categories with documents
+                category_list.append(f"{cat.name} ({cat.count} documents)")
+        
+        content = f"Available document categories:\n" + "\n".join([f"- {cat}" for cat in category_list])
+        content += f"\n\nUse these categories to filter searches with category parameter."
+        
+        return ToolResponse(
+            success=True,
+            content=content,
+            metadata={"categories": [{"name": cat.name, "count": cat.count} for cat in categories]}
+        )
+        
+    except Exception as e:
+        logger.error("Get categories failed", error=str(e), user_id=request.user_id)
+        return ToolResponse(
+            success=False,
+            content=f"Failed to get categories: {str(e)}",
+            error=str(e)
+        )
+
+
 @router.get("/available_tools", response_model=List[Dict[str, Any]])
 async def get_available_tools():
     """
@@ -418,6 +467,15 @@ async def get_available_tools():
         {
             "name": "travel_summary",
             "description": "Get user's travel document summary and statistics",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "get_document_categories",
+            "description": "Get all available document categories to understand what types of documents exist",
             "parameters": {
                 "type": "object",
                 "properties": {},
