@@ -27,10 +27,12 @@ export default function FileUpload({
 }: FileUploadProps) {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
-  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: any[]) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: any) => {
     // Handle rejected files
     if (rejectedFiles.length > 0) {
-      rejectedFiles.forEach((rejection) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rejectedFiles.forEach((rejection: any) => {
         const error = rejection.errors[0]?.message || 'File rejected';
         console.error(`File ${rejection.file.name} rejected: ${error}`);
       });
