@@ -35,13 +35,22 @@ async def initialize_agent(request: AgentInitRequest):
         if not request.user_id:
             raise HTTPException(status_code=400, detail="User ID is required")
             
+        # Log prompt details for verification
+        logger.info("Initializing agent with custom prompt", 
+                   project=request.project,
+                   user_id=request.user_id,
+                   session_id=request.session_id,
+                   prompt_length=len(request.system_prompt),
+                   contains_workflow=("tool_workflow" in request.system_prompt),
+                   prompt_sample=request.system_prompt[:200] + "..." if len(request.system_prompt) > 200 else request.system_prompt)
+        
         agent = await get_or_create_agent(
             project=request.project,
             user_id=request.user_id, 
             system_prompt=request.system_prompt
         )
         
-        logger.info("Agent initialized with custom prompt", 
+        logger.info("Agent initialized successfully with custom prompt", 
                    project=request.project, 
                    session_id=request.session_id)
         

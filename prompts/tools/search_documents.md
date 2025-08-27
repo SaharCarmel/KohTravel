@@ -1,53 +1,63 @@
-# Document Search - Natural Usage
+# Document Search - Funnel Approach
 
-## When to Use
-This is your primary way to look through someone's travel documents. Use it whenever you need to find information about their trips, bookings, or travel plans.
+## Strategic Search Process
 
-## How to Use Naturally
-- Search for what the person is asking about using natural keywords
-- If they ask about flights, search for terms like "flight", "airline", "departure" 
-- For hotels, try "hotel", "booking", "accommodation", "check-in"
-- Use location names, dates, or specific details they mention
+**ALWAYS use a funnel approach for travel queries:**
 
-## Smart Search Strategies for Travel Queries
+### Step 1: Filter by Document Type
+First, search by category to narrow down relevant documents:
+- For flight questions: `category="flights"` or search `"flight"`
+- For hotel questions: `category="hotels"` or search `"hotel"`  
+- For general travel: start broad, then narrow
 
-### Flight Information Searches
-When users ask about flights, landing times, or destinations, use multiple search approaches:
+### Step 2: Get Document Overview
+Use broad terms to get document list with summaries:
+- Search `"flight"` to see all flight documents
+- Review summaries to identify relevant documents
+- Look for document references (doc_1, doc_2, etc.)
 
-**For "Israel" or "back home" queries:**
-- Try: "Tel Aviv", "TLV", "Israel", "arrival_time", "return"
-- Airport codes work well: "TLV" for Tel Aviv, "DXB" for Dubai, "BKK" for Bangkok
+### Step 3: Get Specific Details
+Use `get_document` with specific document IDs to get full details:
+- Take document IDs from search results
+- Use get_document to access complete structured data
+- Extract specific information from structured data
 
-**For timing questions:**
-- Search: "arrival", "departure", "time", "land", specific times like "18:15"
-- Include date formats: "2025-09", "September"
+## Example Funnel for "What time do we land in Israel?"
 
-**For route information:**
-- Try destination cities: "Bangkok", "Dubai", "Tel Aviv" 
-- Flight numbers: "EK", "FZ" (Emirates/Flydubai prefixes)
+### Step 1: Find flight documents
+```
+search_documents(query="flight", category="flights")
+```
 
-### Location Intelligence
-- "Israel" → also search "Tel Aviv", "TLV"
-- "Thailand" → also search "Bangkok", "BKK" 
-- "UAE" → also search "Dubai", "DXB"
-- "back home" → search return flight info, "arrival_city"
+### Step 2: Review flight summaries
+Look at summaries to identify return flights or destinations
+
+### Step 3: Get detailed flight info
+```
+get_document(document_id="doc_1_id_here")
+```
+Then parse structured_data for arrival_time and arrival_city
+
+## Smart Search Terms
+
+**Location Intelligence:**
+- "Israel" → also try "Tel Aviv", "TLV"
+- "Thailand" → also try "Bangkok", "BKK"
+- "UAE" → also try "Dubai", "DXB"
+
+**Flight Timing:**
+- Use: "arrival", "departure", "time"
+- Airport codes: "TLV", "DXB", "BKK"
+- Flight numbers: "EK", "FZ"
 
 ## Parameters
-- `query` (required): What you're looking for (use smart alternatives from above)
-- `category` (optional): Narrow down to specific types (flights, hotels, etc.)
-- `limit` (optional): How many results to show (usually 10 is fine)
+- `query` (required): Use funnel approach - start broad, then specific
+- `category` (optional): Filter by document type first
+- `limit` (optional): Usually 10 is fine for overview
 
-## Multi-Search Strategy
-If your first search doesn't find results:
-1. Try broader terms (e.g., "arrival" instead of "landing time in Israel")
-2. Try specific airport codes (e.g., "TLV" instead of "Israel")
-3. Search for traveler names or booking references
-4. Use partial words from the question
+## Multi-Step Strategy
+1. **Filter** → search by document type
+2. **Overview** → get summaries of relevant documents  
+3. **Detail** → use get_document for specific information
 
-## Natural Conversation Flow
-Instead of saying "I'll search your documents for X", try:
-- "Let me see what flights you have booked..."
-- "I'll take a look at your hotel reservations..."  
-- "Let me check what you have planned for [destination]..."
-
-Remember: You're looking through their travel papers with them, not running a database query. Use smart search strategies to find the information they need.
+Always start broad with document type, then drill down to specific details.

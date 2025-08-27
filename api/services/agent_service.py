@@ -26,6 +26,14 @@ class KohTravelAgentService:
             # Fallback prompt
             prompt = """You are a helpful travel assistant for KohTravel users. 
             You help users understand and organize their travel documents."""
+        else:
+            # Log that we loaded the prompt and show a sample to verify content
+            logger.info("Agent prompt loaded successfully", 
+                       agent=self.agent_name,
+                       prompt_length=len(prompt),
+                       contains_workflow=("tool_workflow" in prompt),
+                       contains_step_1=("step_1" in prompt),
+                       sample=prompt[:200] + "..." if len(prompt) > 200 else prompt)
         
         return prompt
     

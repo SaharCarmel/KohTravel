@@ -270,22 +270,10 @@ async def get_user_document(request: ToolRequest, db: Session = Depends(get_db))
                    content_length=len(document.raw_text or ""),
                    summary_length=len(document.summary or ""))
         
-        # Format the primary content with actual document information
-        content_preview = document.summary or "No summary available"
-        if len(content_preview) > 500:
-            content_preview = content_preview[:500] + "..."
-            
-        primary_content = f"Document: {document.title}\n\n{content_preview}"
-        
-        # Add structured data highlights if available
-        if document.structured_data:
-            structured_info = []
-            for key, value in document.structured_data.items():
-                if value and key.lower() in ['flight_number', 'departure_time', 'arrival_time', 'route', 'passenger', 'date']:
-                    structured_info.append(f"{key.replace('_', ' ').title()}: {value}")
-            
-            if structured_info:
-                primary_content += f"\n\nKey Details:\n" + "\n".join(structured_info)
+        # Give the agent complete raw text so it can find whatever it needs
+        primary_content = f"Document: {document.title}\n\n"
+        primary_content += f"Summary: {document.summary}\n\n"
+        primary_content += f"Full Document Content:\n{document.raw_text}"
         
         return ToolResponse(
             success=True,

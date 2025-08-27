@@ -41,6 +41,13 @@ async def get_or_create_agent(project: str, user_id: str, system_prompt: Optiona
     """Get or create user-scoped agent for project"""
     agent_key = f"{project}:{user_id}"
     
+    # If system_prompt is provided, always create fresh agent (for prompt updates)
+    if system_prompt is not None and agent_key in user_agents:
+        logger.info("Recreating agent with new system prompt", 
+                   project=project, user_id=user_id,
+                   prompt_length=len(system_prompt))
+        del user_agents[agent_key]  # Clear cached agent
+    
     if agent_key in user_agents:
         return user_agents[agent_key]
     
@@ -56,7 +63,7 @@ async def get_or_create_agent(project: str, user_id: str, system_prompt: Optiona
     # Load external tools for project
     project_tools = []
     
-    # Use injected system prompt or default
+    # Use provided system prompt or default
     if system_prompt is None:
         system_prompt = "You are a helpful AI assistant."
     
