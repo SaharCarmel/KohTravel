@@ -28,9 +28,9 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       // Send properties to the client
-      session.accessToken = token.accessToken as string
-      session.provider = token.provider as string
-      session.userId = token.userId as string
+      ;(session as any).accessToken = token.accessToken as string
+      ;(session as any).provider = token.provider as string
+      ;(session as any).userId = token.userId as string
       return session
     },
   },
