@@ -13,7 +13,12 @@ logger = structlog.get_logger(__name__)
 class KohTravelAgentService:
     """Service for managing KohTravel agents with proper prompt injection"""
     
-    def __init__(self, agent_infrastructure_url: str = "http://localhost:8001"):
+    def __init__(self, agent_infrastructure_url: str = None):
+        if agent_infrastructure_url is None:
+            # Use environment variable with fallback
+            import os
+            agent_infrastructure_url = os.getenv('AGENT_INFRASTRUCTURE_URL', 'http://localhost:8001')
+        
         self.agent_infrastructure_url = agent_infrastructure_url
         self.agent_name = "travel-assistant"
     

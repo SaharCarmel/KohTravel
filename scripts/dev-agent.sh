@@ -32,13 +32,15 @@ uv sync --dev
 export DEBUG=true
 export ENVIRONMENT=development
 export AUTH_ENABLED=false
-export CORS_ORIGINS="http://localhost:3000,http://localhost:8000"
 
 # Load environment variables from .env if they exist
 if [ -f ".env" ]; then
     echo "🔧 Loading environment variables from .env"
     export $(grep -v '^#' .env | xargs)
 fi
+
+# Note: CORS is now handled by smart regex pattern in agent code
+# No need for dynamic CORS_ORIGINS configuration
 
 # Check required environment variables
 if [ -z "$ANTHROPIC_API_KEY" ] || [ "$ANTHROPIC_API_KEY" = "sk-your-anthropic-key-here" ]; then
@@ -56,4 +58,4 @@ echo ""
 
 # Start with verbose output to see any errors  
 export PYTHONPATH=.
-exec uv run uvicorn src.server.main:create_app --factory --reload --host 0.0.0.0 --port 8001
+exec uv run uvicorn src.server.main:create_app --factory --reload --host 0.0.0.0 --port ${AGENT_PORT:-8001}

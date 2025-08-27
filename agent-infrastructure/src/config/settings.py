@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Database settings
     database_url: Optional[str] = None
     
+    # Service URLs
+    main_api_url: str = "http://localhost:8000"
+    
     # File access settings
     allowed_file_paths: List[str] = []
     allow_file_write: bool = False

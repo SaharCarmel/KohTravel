@@ -61,10 +61,10 @@ def create_app() -> FastAPI:
     # Add middleware
     settings = get_settings()
     
-    # CORS middleware
+    # CORS middleware - Smart DevOps approach (same as main API)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.get_cors_origins_list(),
+        allow_origin_regex=r"^https?://localhost:[3-8][0-9]{3}$|.*\.vercel\.app$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

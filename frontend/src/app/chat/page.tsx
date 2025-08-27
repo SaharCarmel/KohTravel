@@ -88,7 +88,9 @@ export default function ChatPage() {
   useEffect(() => {
     const testConnection = async () => {
       try {
-        const response = await fetch('http://localhost:8001/health/')
+        // Use environment variable for agent URL or fallback to default
+        const agentURL = process.env.NEXT_PUBLIC_AGENT_URL || 'http://localhost:8001';
+        const response = await fetch(`${agentURL}/health/`)
         setIsConnected(response.ok)
       } catch {
         setIsConnected(false)
@@ -129,7 +131,9 @@ export default function ChatPage() {
       const sessionResponse = await fetch('/api/auth/session')
       const sessionData = await sessionResponse.json()
       
-      const response = await fetch('http://localhost:8000/api/agent/chat/stream', {
+      // Use environment variable for agent URL or fallback to default
+      const agentURL = process.env.NEXT_PUBLIC_AGENT_URL || 'http://localhost:8001';
+      const response = await fetch(`${agentURL}/api/agent/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
