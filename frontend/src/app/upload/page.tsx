@@ -34,16 +34,17 @@ export default function UploadPage() {
       formData.append('files', file);
     });
 
+    // Add temporary documents to state
+    const tempDocs: DocumentStatus[] = files.map((file) => ({
+      id: Math.random().toString(36).substr(2, 9),
+      filename: file.name,
+      status: 'uploading',
+      progress: 0
+    }));
+    
+    setDocuments(prev => [...prev, ...tempDocs]);
+
     try {
-      // Add temporary documents to state
-      const tempDocs: DocumentStatus[] = files.map((file) => ({
-        id: Math.random().toString(36).substr(2, 9),
-        filename: file.name,
-        status: 'uploading',
-        progress: 0
-      }));
-      
-      setDocuments(prev => [...prev, ...tempDocs]);
 
       // Mock upload for now - replace with actual API call
       const response = await fetch('/api/documents/upload/', {

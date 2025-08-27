@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { Search, Filter, SortAsc, Plus, FileText, Calendar, Tag, Trash2, Eye, Upload, ChevronDown, ChevronUp, AlertCircle, CheckCircle, Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,6 +47,7 @@ interface DocumentStatus {
 }
 
 export default function DocumentsPage() {
+  const { data: session } = useSession();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [filteredDocuments, setFilteredDocuments] = useState<Document[]>([]);
@@ -69,12 +71,57 @@ export default function DocumentsPage() {
     filterAndSortDocuments();
   }, [documents, searchQuery, selectedCategory, selectedStatus, sortBy]);
 
+  const getAuthHeaders = () => {
+    try {
+      // Get the NextAuth session token from cookies
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(';').shift();
+        return null;
+      };
+
+      // Try different cookie names that NextAuth might use
+      const cookieNames = [
+        'next-auth.session-token',
+        '__Secure-next-auth.session-token',
+        'nextauth.session-token'
+      ];
+      
+      let sessionToken = null;
+      for (const cookieName of cookieNames) {
+        sessionToken = getCookie(cookieName);
+        if (sessionToken) {
+          console.log(`Found NextAuth token in cookie: ${cookieName}`);
+          break;
+        }
+      }
+      
+      if (sessionToken) {
+        return {
+          'Authorization': `Bearer ${sessionToken}`,
+          'Content-Type': 'application/json'
+        };
+      } else {
+        console.log('No NextAuth session token found, using dev_token fallback');
+        return {
+          'Authorization': 'Bearer dev_token',
+          'Content-Type': 'application/json'
+        };
+      }
+    } catch (error) {
+      console.error('Error getting auth headers:', error);
+      return {
+        'Authorization': 'Bearer dev_token',
+        'Content-Type': 'application/json'
+      };
+    }
+  };
+
   const fetchDocuments = async () => {
     try {
       const response = await fetch('/api/documents/', {
-        headers: {
-          'Authorization': 'Bearer dev_token'
-        }
+        headers: getAuthHeaders()
       });
       
       if (response.ok) {
@@ -90,7 +137,9 @@ export default function DocumentsPage() {
 
   const fetchCategories = async () => {
     try {
-      const response = await fetch('/api/documents/categories/');
+      const response = await fetch('/api/documents/categories/', {
+        headers: getAuthHeaders()
+      });
       if (response.ok) {
         const data = await response.json();
         setCategories(data.categories);
@@ -163,9 +212,7 @@ export default function DocumentsPage() {
     try {
       const response = await fetch(`/api/documents/${documentId}/`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': 'Bearer dev_token'
-        }
+        headers: getAuthHeaders()
       });
 
       if (response.ok) {
@@ -207,10 +254,11 @@ export default function DocumentsPage() {
       
       setUploadDocuments(prev => [...prev, ...tempDocs]);
 
+      const authHeaders = getAuthHeaders();
       const response = await fetch('/api/documents/upload/', {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer dev_token'
+          'Authorization': authHeaders['Authorization']
         },
         body: formData
       });
@@ -261,9 +309,7 @@ export default function DocumentsPage() {
     const poll = async () => {
       try {
         const response = await fetch(`/api/documents/${documentId}/`, {
-          headers: {
-            'Authorization': 'Bearer dev_token'
-          }
+          headers: getAuthHeaders()
         });
         
         if (!response.ok) return;
