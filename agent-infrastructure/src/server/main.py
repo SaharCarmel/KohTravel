@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.server.routes.agent import router as agent_router
 from src.server.routes.health import router as health_router
+from src.server.routes.init import router as init_router
+from src.server.routes.cleanup import router as cleanup_router
 from src.server.middleware.auth import AuthMiddleware
 from src.server.middleware.logging import LoggingMiddleware
 from src.config.settings import get_settings
@@ -68,7 +70,9 @@ def create_app() -> FastAPI:
     
     # Include routers
     app.include_router(health_router, prefix="/health", tags=["health"])
-    app.include_router(agent_router, prefix="/agent", tags=["agent"])
+    app.include_router(init_router, prefix="/api/agent", tags=["agent-init"])
+    app.include_router(agent_router, prefix="/api/agent", tags=["agent"])
+    app.include_router(cleanup_router, prefix="/api/agent", tags=["agent-cleanup"])
     
     return app
 

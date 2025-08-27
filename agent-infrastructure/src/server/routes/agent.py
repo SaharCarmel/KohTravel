@@ -18,8 +18,9 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
-# Global agent instances (in production, use proper DI/registry)
-agents: Dict[str, Agent] = {}
+# User-scoped agent instances for multi-user support
+# Key format: "{project}:{user_id}" 
+user_agents: Dict[str, Agent] = {}
 
 
 class ChatMessage(BaseModel):
@@ -36,10 +37,12 @@ class ChatResponse(BaseModel):
     message: str
 
 
-async def get_or_create_agent(project: str) -> Agent:
-    """Get or create agent for project"""
-    if project in agents:
-        return agents[project]
+async def get_or_create_agent(project: str, user_id: str, system_prompt: Optional[str] = None) -> Agent:
+    """Get or create user-scoped agent for project"""
+    agent_key = f"{project}:{user_id}"
+    
+    if agent_key in user_agents:
+        return user_agents[agent_key]
     
     settings = get_settings()
     
@@ -50,29 +53,31 @@ async def get_or_create_agent(project: str) -> Agent:
     )
     provider = AnthropicProvider(provider_config)
     
-    # Load external tools and system prompt for project
-    system_prompt = "You are a helpful AI assistant."
+    # Load external tools for project
     project_tools = []
     
-    # Try to load project-specific configuration
-    if project == "kohtravel":
-        # Load KohTravel tools from backend API
-        kohtravel_base_url = "http://localhost:8000/api/agent/tools"
+    # Use injected system prompt or default
+    if system_prompt is None:
+        system_prompt = "You are a helpful AI assistant."
+    
+    # Load project-specific tools from external APIs if configured
+    external_tools_config = {
+        "kohtravel": "http://localhost:8000/api/agent/tools"
+        # Add other projects here as needed
+    }
+    
+    if project in external_tools_config:
+        tools_base_url = external_tools_config[project]
         try:
-            external_tools = await external_registry.load_tools_from_endpoint(kohtravel_base_url)
+            external_tools = await external_registry.load_tools_from_endpoint(tools_base_url)
             project_tools.extend(external_tools)
-            
-            # Load system prompt
-            external_prompt = await external_registry.load_system_prompt(kohtravel_base_url)
-            if external_prompt:
-                system_prompt = external_prompt
-                
+            logger.info("Loaded external tools", project=project, count=len(external_tools))
         except Exception as e:
             logger.warning("Failed to load external tools", project=project, error=str(e))
     
     # Create agent config
     agent_config = AgentConfig(
-        name=f"{project}-agent",
+        name=f"{project}-agent-{user_id}",
         system_prompt=system_prompt,
         model=settings.default_model,
         enabled_tools=[tool.name for tool in project_tools] + ["read_file"]
@@ -100,8 +105,8 @@ async def get_or_create_agent(project: str) -> Agent:
         list_tool = ListDirectoryTool(allowed_paths=settings.allowed_file_paths)
         agent.register_tool("list_directory", list_tool)
     
-    agents[project] = agent
-    logger.info("Agent created", project=project, tools=list(agent.tools.keys()))
+    user_agents[agent_key] = agent
+    logger.info("User agent created", project=project, user_id=user_id, agent_key=agent_key, tools=list(agent.tools.keys()))
     
     return agent
 
@@ -110,12 +115,14 @@ async def get_or_create_agent(project: str) -> Agent:
 async def chat(message: ChatMessage, request: Request):
     """Send a message to the agent"""
     try:
-        agent = await get_or_create_agent(message.project)
+        if not message.user_id:
+            raise HTTPException(status_code=400, detail="User ID is required for multi-user support")
+            
+        agent = await get_or_create_agent(message.project, message.user_id)
         
         # Build context
         context = message.context or {}
-        if message.user_id:
-            context["user_id"] = message.user_id
+        context["user_id"] = message.user_id
         
         # Send message (collect full response for non-streaming)
         response_generator = agent.send_message(
@@ -142,12 +149,14 @@ async def chat(message: ChatMessage, request: Request):
 async def chat_stream(message: ChatMessage, request: Request):
     """Stream a conversation with the agent"""
     try:
-        agent = await get_or_create_agent(message.project)
+        if not message.user_id:
+            raise HTTPException(status_code=400, detail="User ID is required for multi-user support")
+            
+        agent = await get_or_create_agent(message.project, message.user_id)
         
         # Build context
         context = message.context or {}
-        if message.user_id:
-            context["user_id"] = message.user_id
+        context["user_id"] = message.user_id
         
         # Send message and get streaming response
         response_generator = agent.send_message(
@@ -176,10 +185,13 @@ async def chat_stream(message: ChatMessage, request: Request):
 
 
 @router.get("/conversation/{session_id}")
-async def get_conversation(session_id: str, project: str = "default"):
+async def get_conversation(session_id: str, project: str = "default", user_id: str = None):
     """Get conversation history"""
     try:
-        agent = await get_or_create_agent(project)
+        if not user_id:
+            raise HTTPException(status_code=400, detail="User ID is required")
+            
+        agent = await get_or_create_agent(project, user_id)
         history = agent.get_conversation_history(session_id)
         
         return {
@@ -194,10 +206,13 @@ async def get_conversation(session_id: str, project: str = "default"):
 
 
 @router.delete("/conversation/{session_id}")
-async def clear_conversation(session_id: str, project: str = "default"):
+async def clear_conversation(session_id: str, project: str = "default", user_id: str = None):
     """Clear conversation history"""
     try:
-        agent = await get_or_create_agent(project)
+        if not user_id:
+            raise HTTPException(status_code=400, detail="User ID is required")
+            
+        agent = await get_or_create_agent(project, user_id)
         agent.clear_conversation(session_id)
         
         return {
@@ -213,12 +228,15 @@ async def clear_conversation(session_id: str, project: str = "default"):
 
 @router.get("/agents")
 async def list_agents():
-    """List all active agents"""
+    """List all active user agents"""
     agent_info = []
     
-    for project, agent in agents.items():
+    for agent_key, agent in user_agents.items():
+        project, user_id = agent_key.split(":", 1)
         agent_info.append({
+            "agent_key": agent_key,
             "project": project,
+            "user_id": user_id,
             "name": agent.config.name,
             "model": agent.config.model,
             "tools": list(agent.tools.keys()),
@@ -229,10 +247,13 @@ async def list_agents():
 
 
 @router.get("/tools")
-async def list_tools(project: str = "default"):
+async def list_tools(project: str = "default", user_id: str = None):
     """List available tools for a project"""
     try:
-        agent = await get_or_create_agent(project)
+        if not user_id:
+            raise HTTPException(status_code=400, detail="User ID is required")
+            
+        agent = await get_or_create_agent(project, user_id)
         
         tools_info = []
         for name, tool in agent.tools.items():

@@ -184,26 +184,6 @@ class ExternalToolRegistry:
             )
             return []
     
-    async def load_system_prompt(self, base_url: str, prompt_endpoint: str = "/system_prompt") -> Optional[str]:
-        """Load system prompt from external API"""
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(f"{base_url}{prompt_endpoint}")
-                response.raise_for_status()
-                
-                data = response.json()
-                prompt = data.get("system_prompt", "")
-                
-                logger.info("Loaded external system prompt", base_url=base_url)
-                return prompt
-                
-        except Exception as e:
-            logger.error(
-                "Failed to load system prompt",
-                base_url=base_url,
-                error=str(e)
-            )
-            return None
     
     def get_tool(self, name: str) -> Optional[ExternalTool]:
         """Get tool by name"""
