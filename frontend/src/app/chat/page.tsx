@@ -88,17 +88,27 @@ export default function ChatPage() {
     setMessages(prev => [...prev, assistantMessage])
 
     try {
+      // Get NextAuth session token for proper authentication
+      const sessionResponse = await fetch('/api/auth/session')
+      const sessionData = await sessionResponse.json()
+      
       // Send to agent service with streaming
-      const response = await fetch('http://localhost:8001/agent/chat/stream', {
+      const response = await fetch('http://localhost:8001/api/agent/chat/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionData?.accessToken || 'dev_token'}`, // Use actual NextAuth token
         },
         body: JSON.stringify({
           session_id: sessionId.current,
           message: userMessage.content,
-          user_id: session.user.email, // Using email as user ID for now
-          project: 'kohtravel'
+          user_id: session.user.email,
+          project: 'kohtravel',
+          context: {
+            session_data: sessionData,
+            user_name: session.user.name,
+            user_image: session.user.image
+          }
         })
       })
 
