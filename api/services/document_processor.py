@@ -63,14 +63,22 @@ class DocumentProcessor:
                     document.structured_data = ai_result.get("structured_data")
                     document.confidence_score = ai_result.get("confidence_score")
                     
-                    # Set category if identified
+                    # Set category - create new one if needed
                     category_name = ai_result.get("category")
                     if category_name:
+                        # First try to find existing category
                         category = self.db.query(DocumentCategory).filter(
                             DocumentCategory.name.ilike(f"%{category_name}%")
                         ).first()
-                        if category:
-                            document.category_id = category.id
+                        
+                        if not category:
+                            # Create new category if it doesn't exist
+                            category = DocumentCategory(name=category_name)
+                            self.db.add(category)
+                            self.db.flush()  # Get the ID
+                            logger.info(f"Created new document category: {category_name}")
+                        
+                        document.category_id = category.id
                     
                     # Create quick reference fields
                     quick_refs_data = ai_result.get("quick_refs", {})
@@ -169,20 +177,30 @@ class DocumentProcessor:
             return None
     
     def _create_analysis_prompt(self, text: str, filename: Optional[str] = None) -> str:
-        """Create prompt for AI analysis"""
+        """Create prompt for AI analysis with existing category intelligence"""
+        
+        # Get existing document categories
+        existing_categories = self.db.query(DocumentCategory).all()
+        categories_list = [cat.name for cat in existing_categories]
         
         filename_hint = f"Filename: {filename}\n\n" if filename else ""
         
-        return f"""You are a travel document analysis assistant. Analyze this COMPLETE document and extract ALL travel information.
+        return f"""You are a travel document classification assistant. 
 
-IMPORTANT: This document may contain multiple flight segments, hotel stays, or travel components. Extract information from the ENTIRE document, not just the beginning.
+EXISTING DOCUMENT CATEGORIES:
+{', '.join(categories_list)}
+
+CLASSIFICATION TASK:
+Analyze this document and decide whether to:
+1. **Use an existing category** if the document clearly fits one of the above types
+2. **Create a new category** if this document represents a new type of travel document
 
 {filename_hint}Document Content:
 {text}
 
 Please analyze this document and respond with a JSON object containing:
 
-1. "category": The document type (e.g., "flight_booking", "hotel_reservation", "restaurant_receipt", "tour_booking", "transport_ticket", "visa_document", "travel_insurance", "other")
+1. "category": Choose from existing categories OR create a new descriptive category name (e.g., "Legal Policy", "Terms and Conditions", "Activity Voucher", "Insurance Policy")
 
 2. "summary": A comprehensive summary that includes ALL travel segments, dates, destinations, and key details found in the document. For multi-segment trips, list each leg clearly.
 

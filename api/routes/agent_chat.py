@@ -65,7 +65,9 @@ async def stream_chat_with_agent(request: ChatRequest, db: Session = Depends(get
     async def generate_stream():
         try:
             # Ensure agent is initialized for this user
-            await kohtravel_agent_service.initialize_agent(request.user_id)
+            logger.info("Initializing KohTravel agent", user_id=request.user_id)
+            init_success = await kohtravel_agent_service.initialize_agent(request.user_id)
+            logger.info("Agent initialization result", user_id=request.user_id, success=init_success)
             
             # Stream the conversation through agent infrastructure
             async with httpx.AsyncClient(timeout=60) as client:
