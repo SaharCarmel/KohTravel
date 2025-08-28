@@ -7,6 +7,7 @@ import re
 from routes.documents import router as documents_router
 from routes.agent_tools import router as agent_tools_router
 from routes.agent_chat import router as agent_chat_router
+from routes.calendar import router as calendar_router
 
 app = FastAPI(
     title="KohTravel API",
@@ -54,6 +55,7 @@ app.add_middleware(
 app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
 app.include_router(agent_tools_router, prefix="/api/agent/tools", tags=["agent-tools"])
 app.include_router(agent_chat_router, prefix="/api/agent", tags=["agent-chat"])
+app.include_router(calendar_router, tags=["calendar"])
 
 @app.get("/")
 def read_root():

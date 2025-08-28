@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import SignInButton from '@/components/auth/SignInButton'
-import { Home, FileText, MessageSquare, Plane, DollarSign } from 'lucide-react'
+import { Home, FileText, MessageSquare, Calendar, DollarSign } from 'lucide-react'
 
 export default function Navigation() {
   const pathname = usePathname()
@@ -13,7 +13,7 @@ export default function Navigation() {
     { href: '/', label: 'Home', icon: Home },
     { href: '/chat', label: 'Chat', icon: MessageSquare },
     { href: '/documents', label: 'Documents', icon: FileText },
-    { href: '/planning', label: 'Planning', icon: Plane, disabled: true },
+    { href: '/calendar', label: 'Calendar', icon: Calendar },
     { href: '/expenses', label: 'Expenses', icon: DollarSign, disabled: true },
   ]
 
