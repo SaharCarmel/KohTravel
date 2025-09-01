@@ -1,118 +1,111 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, isSameMonth, isSameDay, isToday, startOfDay, endOfDay, addWeeks, subWeeks, addMonths, subMonths, eachHourOfInterval, startOfHour } from "date-fns";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { calendarAPI, type CalendarEvent, type EventType } from "@/lib/calendar-api";
+import { AddEventDialog } from "./AddEventDialog";
 
-// Mock trip events data - Thailand Adventure Trip
-const mockEvents = [
-  {
-    id: 1,
-    title: "Flight to Bangkok",
-    date: new Date(2025, 7, 30), // August 30, 2025
-    time: "08:30",
-    type: "flight",
-    color: "bg-blue-500",
-    description: "TG 123 - Don Mueang Airport"
-  },
-  {
-    id: 2,
-    title: "Hotel Check-in",
-    date: new Date(2025, 7, 30),
-    time: "15:00",
-    type: "accommodation",
-    color: "bg-green-500",
-    description: "Chatrium Hotel Riverside"
-  },
-  {
-    id: 3,
-    title: "Temple Tour",
-    date: new Date(2025, 7, 31),
-    time: "09:00",
-    type: "activity",
-    color: "bg-purple-500",
-    description: "Wat Pho & Grand Palace"
-  },
-  {
-    id: 4,
-    title: "Cooking Class",
-    date: new Date(2025, 8, 1), // September 1, 2025
-    time: "14:00",
-    type: "activity",
-    color: "bg-orange-500",
-    description: "Thai Cooking Academy"
-  },
-  {
-    id: 5,
-    title: "Ferry to Koh Samui",
-    date: new Date(2025, 8, 2),
-    time: "07:00",
-    type: "transport",
-    color: "bg-cyan-500",
-    description: "Lomprayah High Speed Ferry"
-  },
-  {
-    id: 6,
-    title: "Beach Resort Check-in",
-    date: new Date(2025, 8, 2),
-    time: "14:00",
-    type: "accommodation",
-    color: "bg-green-500",
-    description: "Four Seasons Koh Samui"
-  },
-  {
-    id: 7,
-    title: "Snorkeling Trip",
-    date: new Date(2025, 8, 4),
-    time: "08:30",
-    type: "activity",
-    color: "bg-blue-400",
-    description: "Angthong Marine Park"
-  },
-  {
-    id: 8,
-    title: "Spa Appointment",
-    date: new Date(2025, 8, 5),
-    time: "16:00",
-    type: "wellness",
-    color: "bg-pink-500",
-    description: "Traditional Thai Massage"
-  },
-  {
-    id: 9,
-    title: "Flight to Phuket",
-    date: new Date(2025, 8, 6),
-    time: "11:00",
-    type: "flight",
-    color: "bg-blue-500",
-    description: "Bangkok Airways PG 145"
-  },
-  {
-    id: 10,
-    title: "Sunset Dinner",
-    date: new Date(2025, 8, 7),
-    time: "18:30",
-    type: "dining",
-    color: "bg-yellow-500",
-    description: "Mom Tri's Kitchen"
-  }
-];
+// Convert API event to display format
+const convertEvent = (apiEvent: CalendarEvent) => {
+  const startDate = new Date(apiEvent.start_datetime);
+  return {
+    id: apiEvent.id,
+    title: apiEvent.title,
+    date: startDate,
+    time: format(startDate, "HH:mm"),
+    type: apiEvent.event_type,
+    color: apiEvent.color || getDefaultColor(apiEvent.event_type),
+    description: apiEvent.description || apiEvent.location || '',
+  };
+};
 
-type Event = typeof mockEvents[0];
+const getDefaultColor = (eventType: string) => {
+  const colors: Record<string, string> = {
+    "flight": "bg-blue-500",
+    "accommodation": "bg-green-500",
+    "activity": "bg-purple-500",
+    "transport": "bg-cyan-500",
+    "dining": "bg-yellow-500",
+    "wellness": "bg-pink-500"
+  };
+  return colors[eventType] || "bg-gray-500";
+};
+
+type Event = ReturnType<typeof convertEvent>;
 type ViewMode = 'month' | 'week' | 'day';
 
 export function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('month');
+  const [events, setEvents] = useState<Event[]>([]);
+  const [eventTypes, setEventTypes] = useState<EventType[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isAddEventDialogOpen, setIsAddEventDialogOpen] = useState(false);
+
+  // Fetch events from API
+  const fetchEvents = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // Get date range based on current view mode
+      let startDate: Date, endDate: Date;
+      
+      if (viewMode === 'month') {
+        startDate = startOfWeek(startOfMonth(currentDate));
+        endDate = endOfWeek(endOfMonth(currentDate));
+      } else if (viewMode === 'week') {
+        startDate = startOfWeek(currentDate);
+        endDate = endOfWeek(currentDate);
+      } else {
+        startDate = startOfDay(currentDate);
+        endDate = endOfDay(currentDate);
+      }
+      
+      const apiEvents = await calendarAPI.getEvents({
+        start_date: format(startDate, 'yyyy-MM-dd'),
+        end_date: format(endDate, 'yyyy-MM-dd'),
+      });
+      
+      const convertedEvents = apiEvents.map(convertEvent);
+      setEvents(convertedEvents);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch events');
+      console.error('Error fetching events:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch event types
+  const fetchEventTypes = async () => {
+    try {
+      const response = await calendarAPI.getEventTypes();
+      setEventTypes(response.event_types);
+    } catch (err) {
+      console.error('Error fetching event types:', err);
+    }
+  };
+
+  // Load data on mount and when view changes
+  useEffect(() => {
+    fetchEvents();
+  }, [currentDate, viewMode]);
+
+  useEffect(() => {
+    fetchEventTypes();
+  }, []);
 
   // Get events for a specific date
   const getEventsForDate = (date: Date): Event[] => {
-    return mockEvents.filter(event => isSameDay(event.date, date));
+    return events.filter(event => isSameDay(event.date, date));
   };
 
   // Navigate dates based on view mode
@@ -361,10 +354,30 @@ export function Calendar() {
     );
   };
 
+  if (error) {
+    return (
+      <Card className="p-8 text-center">
+        <div className="text-red-600 mb-4">
+          <p className="font-semibold">Error loading calendar</p>
+          <p className="text-sm text-gray-600">{error}</p>
+        </div>
+        <Button onClick={fetchEvents} variant="outline">
+          Try Again
+        </Button>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {/* Calendar Header */}
       <Card className="p-4">
+        {isLoading && (
+          <div className="flex items-center justify-center py-4 mb-4">
+            <Loader2 className="h-5 w-5 animate-spin mr-2" />
+            <span className="text-sm text-gray-600">Loading calendar events...</span>
+          </div>
+        )}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-4">
             <Button
@@ -415,7 +428,7 @@ export function Calendar() {
               </Button>
             </div>
             
-            <Button size="sm">
+            <Button size="sm" onClick={() => setIsAddEventDialogOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
               Add Event
             </Button>
@@ -473,14 +486,7 @@ export function Calendar() {
       <Card className="p-4">
         <h3 className="text-sm font-medium mb-3">Event Types</h3>
         <div className="flex flex-wrap gap-3">
-          {[
-            { type: "flight", color: "bg-blue-500", label: "Flight" },
-            { type: "accommodation", color: "bg-green-500", label: "Accommodation" },
-            { type: "activity", color: "bg-purple-500", label: "Activity" },
-            { type: "transport", color: "bg-cyan-500", label: "Transport" },
-            { type: "dining", color: "bg-yellow-500", label: "Dining" },
-            { type: "wellness", color: "bg-pink-500", label: "Wellness" }
-          ].map(({ type, color, label }) => (
+          {eventTypes.map(({ type, color, label }) => (
             <div key={type} className="flex items-center space-x-2">
               <div className={cn("w-3 h-3 rounded-full", color)} />
               <span className="text-sm">{label}</span>
@@ -488,6 +494,17 @@ export function Calendar() {
           ))}
         </div>
       </Card>
+
+      {/* Add Event Dialog */}
+      <AddEventDialog
+        isOpen={isAddEventDialogOpen}
+        onClose={() => setIsAddEventDialogOpen(false)}
+        onSuccess={() => {
+          fetchEvents(); // Refresh events after creation
+        }}
+        eventTypes={eventTypes}
+        initialDate={selectedDate || currentDate}
+      />
     </div>
   );
 }

@@ -66,11 +66,6 @@ async def get_current_user(
         else:
             logger.warning("Cookie authentication failed")
     
-    # Method 3: Check for development token (remove in production)
-    if authorization and authorization == "Bearer dev_token":
-        logger.warning("Using development authentication - remove in production")
-        return await get_development_user(db)
-    
     logger.error("All authentication methods failed")
     raise HTTPException(
         status_code=401, 

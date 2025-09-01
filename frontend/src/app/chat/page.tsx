@@ -137,8 +137,8 @@ export default function ChatPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sessionData?.accessToken || 'dev_token'}`,
         },
+        credentials: 'include', // Include NextAuth session cookies
         body: JSON.stringify({
           session_id: sessionId.current,
           message: text,

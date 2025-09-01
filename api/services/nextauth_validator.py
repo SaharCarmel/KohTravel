@@ -7,8 +7,8 @@ from typing import Optional, Dict, Any
 import structlog
 from fastapi import HTTPException
 from hkdf import Hkdf
+from jose import jwt, JWTError
 from jose.jwe import decrypt
-from jose import JWTError
 
 logger = structlog.get_logger(__name__)
 
@@ -72,16 +72,61 @@ class NextAuthValidator:
         
         return None
     
-    async def validate_session_token(self, token: str) -> Optional[Dict[str, Any]]:
+    def _get_signing_key_jwt(self, secret: str) -> str:
         """
-        Validate NextAuth.js session token (JWE format) and return user info
+        Generate signing key for NextAuth.js JWT tokens
+        """
+        # NextAuth.js v4 uses the secret directly for JWT signing
+        return secret
+    
+    def _validate_with_nextauth_official(self, token: str) -> Optional[Dict[str, Any]]:
+        """
+        Use NextAuth.js validation endpoint for reliable token validation
         """
         try:
-            # Try to decrypt JWE token using multiple approaches
-            payload = self._try_decrypt_jwe(token)
+            import httpx
+            import json
+            import os
             
+            # Use the frontend's NextAuth validation endpoint
+            frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+            
+            with httpx.Client(timeout=5.0) as client:
+                response = client.post(
+                    f"{frontend_url}/api/validate-token",
+                    json={"token": token},
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        return result.get('user')
+                    else:
+                        logger.debug("NextAuth validation endpoint failed", error=result.get('error'))
+                else:
+                    logger.debug("NextAuth validation endpoint error", status_code=response.status_code)
+            
+        except Exception as e:
+            logger.debug("NextAuth validation endpoint error", error=str(e))
+        
+        return None
+
+    async def validate_session_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """
+        Validate NextAuth.js session token using official NextAuth library
+        """
+        try:
+            # Use NextAuth.js official library for reliable token validation
+            user_info = self._validate_with_nextauth_official(token)
+            
+            if user_info:
+                return user_info
+            
+            # Fallback: Try manual JWE decryption as backup
+            payload = self._try_decrypt_jwe(token)
             if not payload:
-                logger.warning("JWE decryption failed with all methods", token_prefix=token[:20])
+                logger.warning("All NextAuth validation methods failed", token_prefix=token[:20])
                 return None
             
             # Extract user information from the payload
@@ -89,7 +134,7 @@ class NextAuthValidator:
                 "user_id": payload.get("sub"),  # Subject (user ID)
                 "email": payload.get("email"),
                 "name": payload.get("name"),
-                "image": payload.get("picture"),
+                "image": payload.get("picture") or payload.get("image"),
                 "provider": payload.get("provider", "unknown"),
                 "exp": payload.get("exp"),
                 "iat": payload.get("iat")
@@ -103,12 +148,12 @@ class NextAuthValidator:
             logger.info("Token validated successfully", 
                        email=user_info["email"], 
                        provider=user_info["provider"],
-                       payload_keys=list(payload.keys()))
+                       token_type="JWT" if self._try_validate_jwt(token) else "JWE")
             
             return user_info
             
         except Exception as e:
-            logger.warning("Token validation failed", error=str(e), token_prefix=token[:20] if token else "None")
+            logger.error("Token validation failed", error=str(e), token_prefix=token[:20] if token else "None")
             return None
     
     async def validate_api_token(self, authorization_header: str) -> Optional[Dict[str, Any]]:
