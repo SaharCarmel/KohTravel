@@ -17,7 +17,9 @@ import {
   Hotel,
   MapPin,
   Calendar,
-  FileText
+  FileText,
+  CalendarDays,
+  X
 } from 'lucide-react'
 import { InteractiveCalendarWidget } from '@/components/calendar/InteractiveCalendarWidget'
 import { calendarAPI, type CalendarEvent } from '@/lib/calendar-api'
@@ -93,7 +95,7 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Handle calendar widget visibility (shown when agent creates suggestions)
+  // Handle calendar widget visibility (shown when agent creates suggestions or user manually toggles)
   const showCalendarWidgetHandler = useCallback(() => {
     setShowCalendarWidget(true)
     setWidgetKey(prev => prev + 1) // Force refresh
@@ -102,6 +104,17 @@ export default function ChatPage() {
     // Only reset calendar feedbacks for the new session
     setCalendarFeedbacks([])
   }, [])
+
+  // Toggle calendar widget visibility for manual control
+  const toggleCalendarWidget = useCallback(() => {
+    if (showCalendarWidget) {
+      // Close without going through the review process
+      setShowCalendarWidget(false)
+    } else {
+      // Open the widget
+      showCalendarWidgetHandler()
+    }
+  }, [showCalendarWidget, showCalendarWidgetHandler])
 
   // Handle event approval
   const handleEventApproved = useCallback((eventId: string, approvedEvent: CalendarEvent) => {
@@ -518,8 +531,31 @@ export default function ChatPage() {
               </div>
             </div>
             
-            {messages.length > 0 && (
-              <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={toggleCalendarWidget}
+                className={`border-slate-200 font-medium ${
+                  showCalendarWidget 
+                    ? 'bg-blue-50 text-blue-600 border-blue-200 shadow-sm' 
+                    : 'hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600 hover:shadow-sm'
+                }`}
+              >
+                {showCalendarWidget ? (
+                  <>
+                    <X className="h-4 w-4" />
+                    <span className="ml-2">Hide Events</span>
+                  </>
+                ) : (
+                  <>
+                    <CalendarDays className="h-4 w-4" />
+                    <span className="ml-2">Show Events</span>
+                  </>
+                )}
+              </Button>
+              
+              {messages.length > 0 && (
                 <Button 
                   variant="outline" 
                   size="sm" 
@@ -538,6 +574,9 @@ export default function ChatPage() {
                     </>
                   )}
                 </Button>
+              )}
+              
+              {messages.length > 0 && (
                 <Button 
                   variant="outline" 
                   size="sm" 
@@ -547,8 +586,8 @@ export default function ChatPage() {
                   <Trash2 className="h-4 w-4" />
                   <span className="ml-2">Clear</span>
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -696,6 +735,29 @@ export default function ChatPage() {
           </div>
         )}
       </div>
+
+      {/* Manual Calendar Widget - Can be shown anytime */}
+      {showCalendarWidget && !messages.some(msg => msg.role === 'assistant' && !msg.streaming && messages.indexOf(msg) === messages.length - 1) && (
+        <div className="flex-shrink-0 px-4 pb-4 max-w-3xl mx-auto overflow-hidden">
+          <div className="max-h-[70vh] overflow-y-auto">
+            <InteractiveCalendarWidget
+              key={widgetKey}
+              compact={false}
+              showOnlySuggested={false}
+              enableInteractions={true}
+              showCloseButton={false}
+              maxHeight="none"
+              onEventApproved={handleEventApproved}
+              onEventRejected={handleEventRejected}
+              onEventFeedback={handleEventFeedback}
+              onWidgetClosed={handleCalendarWidgetClosed}
+              approvedEventIds={approvedEvents}
+              rejectedEventIds={rejectedEvents}
+              className="border-2 border-blue-200 rounded-lg bg-gradient-to-br from-blue-50 to-indigo-50"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Input Area - Fixed */}
       <footer className="flex-shrink-0 border-t bg-white p-4">
