@@ -429,7 +429,9 @@ export default function ChatPage() {
   }, [input, isLoading, session, calendarFeedbacks])
 
   // Assign sendMessage to ref for use in callbacks
-  sendMessageRef.current = sendMessage
+  useEffect(() => {
+    sendMessageRef.current = sendMessage
+  }, [sendMessage])
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

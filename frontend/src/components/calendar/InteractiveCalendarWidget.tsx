@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, isSameMonth, isSameDay, isToday, addMonths, subMonths, startOfDay, endOfDay, addWeeks, subWeeks, addDays as addDaysUtility } from "date-fns";
 import { ChevronLeft, ChevronRight, Check, X, ThumbsUp, ThumbsDown, MessageCircle, Calendar, Clock, MapPin, Star, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -122,6 +122,22 @@ export function InteractiveCalendarWidget({
   const [isActionInProgress, setIsActionInProgress] = useState(false);
   const [currentEventIndex, setCurrentEventIndex] = useState(0);
   const [viewMode, setViewMode] = useState<'month' | 'week' | 'day'>('month');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const datePickerRef = useRef<HTMLDivElement>(null);
+
+  // Close date picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (datePickerRef.current && !datePickerRef.current.contains(event.target as Node)) {
+        setShowDatePicker(false);
+      }
+    };
+
+    if (showDatePicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showDatePicker]);
 
   // Get suggested events for navigation (exclude already approved/rejected)
   const pendingSuggestedEvents = events.filter(event => 
@@ -170,10 +186,24 @@ export function InteractiveCalendarWidget({
     try {
       setIsLoading(true);
       
-      const monthStart = startOfMonth(currentDate);
-      const monthEnd = endOfMonth(currentDate);
-      const startDate = startOfWeek(monthStart);
-      const endDate = endOfWeek(monthEnd);
+      // Calculate date range based on view mode
+      let startDate: Date, endDate: Date;
+      
+      if (viewMode === 'day') {
+        // For day view: get the single day plus some buffer
+        startDate = startOfDay(currentDate);
+        endDate = endOfDay(currentDate);
+      } else if (viewMode === 'week') {
+        // For week view: get the week containing the current date
+        startDate = startOfWeek(currentDate);
+        endDate = endOfWeek(currentDate);
+      } else {
+        // For month view: get the full month grid (including partial weeks)
+        const monthStart = startOfMonth(currentDate);
+        const monthEnd = endOfMonth(currentDate);
+        startDate = startOfWeek(monthStart);
+        endDate = endOfWeek(monthEnd);
+      }
       
       const apiEvents = await calendarAPI.getEvents({
         start_date: format(startDate, 'yyyy-MM-dd'),
@@ -182,9 +212,13 @@ export function InteractiveCalendarWidget({
       
       let convertedEvents = apiEvents.map(convertEvent);
       
-      // Filter for suggested events only if requested
+      // Filter events based on context
       if (showOnlySuggested) {
-        convertedEvents = convertedEvents.filter(event => event.isSuggested);
+        // In chat mode: show both confirmed and suggested events for full schedule visibility
+        // Only exclude cancelled and tentative events
+        convertedEvents = convertedEvents.filter(event => 
+          event.status === 'confirmed' || event.status === 'suggested'
+        );
       }
       
       // DON'T filter out approved/rejected events - keep them visible with status
@@ -196,7 +230,7 @@ export function InteractiveCalendarWidget({
     } finally {
       setIsLoading(false);
     }
-  }, [currentDate, showOnlySuggested, approvedEventIds, rejectedEventIds]);
+  }, [currentDate, viewMode, showOnlySuggested]);
 
   useEffect(() => {
     fetchEvents();
@@ -231,8 +265,12 @@ export function InteractiveCalendarWidget({
       setApprovedEvents(prev => new Set([...prev, event.id]));
       onEventApproved?.(event.id, approvedEvent);
       
-      // Remove the event from local state immediately (optimistic update)
-      setEvents(prev => prev.filter(e => e.id !== event.id));
+      // Update event status in local state (optimistic update)
+      setEvents(prev => prev.map(e => 
+        e.id === event.id 
+          ? { ...e, status: 'confirmed' as const } 
+          : e
+      ));
     } catch (error) {
       console.error('Failed to approve event:', error);
     } finally {
@@ -254,8 +292,12 @@ export function InteractiveCalendarWidget({
       setRejectedEvents(prev => new Set([...prev, event.id]));
       onEventRejected?.(event.id, feedback);
       
-      // Remove the event from local state immediately (optimistic update)
-      setEvents(prev => prev.filter(e => e.id !== event.id));
+      // Keep event visible but mark as rejected (optimistic update)
+      setEvents(prev => prev.map(e => 
+        e.id === event.id 
+          ? { ...e, status: 'cancelled' as const } 
+          : e
+      ));
     } catch (error) {
       console.error('Failed to reject event:', error);
     } finally {
@@ -315,28 +357,38 @@ export function InteractiveCalendarWidget({
 
     while (day <= endDate) {
       for (let i = 0; i < 7; i++) {
-        const dayEvents = getEventsForDate(day);
-        const isCurrentMonth = isSameMonth(day, monthStart);
-        const isSelected = selectedDate && isSameDay(day, selectedDate);
-        const isTodayDate = isToday(day);
+        const currentDay = day; // Capture the current day value for closures
+        const dayEvents = getEventsForDate(currentDay);
+        const isCurrentMonth = isSameMonth(currentDay, monthStart);
+        const isSelected = selectedDate && isSameDay(currentDay, selectedDate);
+        const isTodayDate = isToday(currentDay);
         
         days.push(
           <div
             key={day.toString()}
             className={cn(
               compact ? "min-h-16 p-1" : "min-h-24 p-2",
-              "border border-gray-200 cursor-pointer transition-colors",
+              "border border-gray-200 cursor-pointer transition-colors select-none",
               !isCurrentMonth && "bg-gray-50 text-gray-400",
               isSelected && "bg-blue-50 border-blue-300",
               isTodayDate && "bg-yellow-50 border-yellow-300",
-              "hover:bg-gray-50"
+              "hover:bg-gray-50 hover:shadow-sm"
             )}
             onClick={() => {
-              setSelectedDate(day);
+              setSelectedDate(currentDay);
               if (dayEvents.length > 0) {
                 setSelectedEvent(dayEvents[0]);
               }
             }}
+            onDoubleClick={() => {
+              setCurrentDate(currentDay);
+              setViewMode('day');
+              setSelectedDate(currentDay);
+              if (dayEvents.length > 0) {
+                setSelectedEvent(dayEvents[0]);
+              }
+            }}
+            title={`${format(currentDay, 'EEEE, MMMM d, yyyy')}${dayEvents.length > 0 ? ` (${dayEvents.length} event${dayEvents.length > 1 ? 's' : ''})` : ''} - Double-click to focus on this day`}
           >
             <div className="flex justify-between items-start mb-1">
               <span className={cn(
@@ -345,7 +397,7 @@ export function InteractiveCalendarWidget({
                 isTodayDate && "text-yellow-600 font-bold",
                 !isCurrentMonth && "text-gray-400"
               )}>
-                {format(day, "d")}
+                {format(currentDay, "d")}
               </span>
               {dayEvents.length > 0 && (
                 <Badge variant="secondary" className="text-xs px-1 py-0">
@@ -360,11 +412,16 @@ export function InteractiveCalendarWidget({
                   className={cn(
                     "text-xs p-1 rounded text-white truncate relative",
                     event.color,
+                    // Suggested event styling
                     event.isSuggested && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) && "opacity-70 border border-dashed border-white/50",
+                    // Approved event styling
                     approvedEventIds.has(event.id) && "opacity-90 border-2 border-solid border-green-400",
-                    rejectedEventIds.has(event.id) && "opacity-50 border-2 border-solid border-red-400 line-through"
+                    // Rejected event styling  
+                    rejectedEventIds.has(event.id) && "opacity-50 border-2 border-solid border-red-400 line-through",
+                    // Confirmed event styling (default, solid appearance)
+                    event.status === 'confirmed' && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) && "opacity-100 border border-solid border-white/20"
                   )}
-                  title={`${event.time} - ${event.title}${event.isSuggested && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) ? ' (Suggested)' : ''}${approvedEventIds.has(event.id) ? ' (Approved ✓)' : ''}${rejectedEventIds.has(event.id) ? ' (Rejected ✗)' : ''}`}
+                  title={`${event.time} - ${event.title}${event.isSuggested && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) ? ' (Suggested)' : ''}${approvedEventIds.has(event.id) ? ' (Approved ✓)' : ''}${rejectedEventIds.has(event.id) ? ' (Rejected ✗)' : ''}${event.status === 'confirmed' && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) ? ' (Confirmed)' : ''}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     setSelectedEvent(event);
@@ -412,10 +469,10 @@ export function InteractiveCalendarWidget({
         <div
           key={day.toString()}
           className={cn(
-            "border border-gray-200 cursor-pointer transition-colors p-3 min-h-32",
+            "border border-gray-200 cursor-pointer transition-colors p-3 min-h-32 select-none",
             isSelected && "bg-blue-50 border-blue-300",
             isTodayDate && "bg-yellow-50 border-yellow-300",
-            "hover:bg-gray-50"
+            "hover:bg-gray-50 hover:shadow-sm"
           )}
           onClick={() => {
             setSelectedDate(day);
@@ -423,6 +480,15 @@ export function InteractiveCalendarWidget({
               setSelectedEvent(dayEvents[0]);
             }
           }}
+          onDoubleClick={() => {
+            setCurrentDate(day);
+            setViewMode('day');
+            setSelectedDate(day);
+            if (dayEvents.length > 0) {
+              setSelectedEvent(dayEvents[0]);
+            }
+          }}
+          title={`${format(day, 'EEEE, MMMM d, yyyy')}${dayEvents.length > 0 ? ` (${dayEvents.length} event${dayEvents.length > 1 ? 's' : ''})` : ''} - Double-click to focus on this day`}
         >
           <div className="flex justify-between items-center mb-2">
             <div className="text-center">
@@ -449,11 +515,16 @@ export function InteractiveCalendarWidget({
                 className={cn(
                   "text-xs p-2 rounded text-white relative cursor-pointer",
                   event.color,
+                  // Suggested event styling
                   event.isSuggested && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) && "opacity-70 border border-dashed border-white/50",
+                  // Approved event styling
                   approvedEventIds.has(event.id) && "opacity-90 border-2 border-solid border-green-400",
-                  rejectedEventIds.has(event.id) && "opacity-50 border-2 border-solid border-red-400"
+                  // Rejected event styling
+                  rejectedEventIds.has(event.id) && "opacity-50 border-2 border-solid border-red-400",
+                  // Confirmed event styling
+                  event.status === 'confirmed' && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) && "opacity-100 border border-solid border-white/20"
                 )}
-                title={`${event.time} - ${event.title}${event.isSuggested && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) ? ' (Suggested)' : ''}${approvedEventIds.has(event.id) ? ' (Approved ✓)' : ''}${rejectedEventIds.has(event.id) ? ' (Rejected ✗)' : ''}`}
+                title={`${event.time} - ${event.title}${event.isSuggested && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) ? ' (Suggested)' : ''}${approvedEventIds.has(event.id) ? ' (Approved ✓)' : ''}${rejectedEventIds.has(event.id) ? ' (Rejected ✗)' : ''}${event.status === 'confirmed' && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) ? ' (Confirmed)' : ''}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   setSelectedEvent(event);
@@ -513,9 +584,14 @@ export function InteractiveCalendarWidget({
                 className={cn(
                   "p-3 rounded-lg text-white relative cursor-pointer",
                   event.color,
+                  // Suggested event styling
                   event.isSuggested && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) && "opacity-70 border-2 border-dashed border-white/50",
+                  // Approved event styling
                   approvedEventIds.has(event.id) && "opacity-90 border-2 border-solid border-green-400",
-                  rejectedEventIds.has(event.id) && "opacity-50 border-2 border-solid border-red-400"
+                  // Rejected event styling
+                  rejectedEventIds.has(event.id) && "opacity-50 border-2 border-solid border-red-400",
+                  // Confirmed event styling
+                  event.status === 'confirmed' && !approvedEventIds.has(event.id) && !rejectedEventIds.has(event.id) && "opacity-100 border-2 border-solid border-white/20"
                 )}
                 onClick={() => setSelectedEvent(event)}
               >
@@ -557,7 +633,7 @@ export function InteractiveCalendarWidget({
               <span className="text-2xl">{getEventTypeIcon(selectedEvent.type)}</span>
               <div>
                 <CardTitle className="text-lg">{selectedEvent.title}</CardTitle>
-                {selectedEvent.isSuggested && (
+                {(selectedEvent.isSuggested || selectedEvent.status === 'confirmed') && (
                   <div className="flex items-center gap-2 mt-1">
                     {approvedEventIds.has(selectedEvent.id) ? (
                       <Badge variant="secondary" className="text-xs bg-green-200 text-green-800">
@@ -566,6 +642,10 @@ export function InteractiveCalendarWidget({
                     ) : rejectedEventIds.has(selectedEvent.id) ? (
                       <Badge variant="secondary" className="text-xs bg-red-200 text-red-800">
                         ❌ Rejected
+                      </Badge>
+                    ) : selectedEvent.status === 'confirmed' ? (
+                      <Badge variant="secondary" className="text-xs bg-blue-200 text-blue-800">
+                        ✓ Confirmed
                       </Badge>
                     ) : (
                       <Badge variant="secondary" className="text-xs bg-amber-200 text-amber-800">
@@ -855,17 +935,70 @@ export function InteractiveCalendarWidget({
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <h2 className={cn(
-              "font-semibold text-center",
-              compact ? "text-base min-w-32" : "text-xl min-w-48"
-            )}>
-              {viewMode === 'day' 
-                ? format(currentDate, "MMMM d, yyyy")
-                : viewMode === 'week'
-                ? `${format(startOfWeek(currentDate), "MMM d")} - ${format(endOfWeek(currentDate), "MMM d, yyyy")}`
-                : format(currentDate, "MMMM yyyy")
-              }
-            </h2>
+            {/* Date Display with Click-to-Edit */}
+            <div className="relative">
+              <h2 
+                className={cn(
+                  "font-semibold text-center cursor-pointer hover:text-blue-600 transition-colors",
+                  compact ? "text-base min-w-32" : "text-xl min-w-48"
+                )}
+                onClick={() => setShowDatePicker(!showDatePicker)}
+                title="Click to jump to a specific date"
+              >
+                {viewMode === 'day' 
+                  ? format(currentDate, "MMMM d, yyyy")
+                  : viewMode === 'week'
+                  ? `${format(startOfWeek(currentDate), "MMM d")} - ${format(endOfWeek(currentDate), "MMM d, yyyy")}`
+                  : format(currentDate, "MMMM yyyy")
+                }
+              </h2>
+              
+              {/* Date Picker Dropdown */}
+              {showDatePicker && (
+                <div 
+                  ref={datePickerRef}
+                  className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 p-3 bg-white border border-gray-200 rounded-lg shadow-lg z-50"
+                >
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700 block">
+                      Jump to date:
+                    </label>
+                    <input
+                      type="date"
+                      value={format(currentDate, 'yyyy-MM-dd')}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          setCurrentDate(new Date(e.target.value));
+                          setShowDatePicker(false);
+                        }
+                      }}
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setCurrentDate(new Date());
+                          setShowDatePicker(false);
+                        }}
+                        className="text-xs"
+                      >
+                        Today
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowDatePicker(false)}
+                        className="text-xs"
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
             <Button
               variant="outline"
               size="sm"
