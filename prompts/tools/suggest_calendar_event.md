@@ -28,11 +28,22 @@ Suggest new calendar events for user review and approval. Events appear in the i
 - You want to propose events based on document analysis
 - User needs schedule optimization
 - You're helping plan daily itineraries
+- Creating events that need user approval before being added to calendar
 
 ❌ **Don't use for**:
 - Events that already exist in documents (use `create_calendar_event` instead)
 - Updating existing events (use `update_calendar_event`)
 - Just showing existing suggestions (use `show_suggested_events_carousel`)
+
+## IMPORTANT: Suggested vs Confirmed Events
+
+**This tool creates events with `status="suggested"`** which:
+- Appear in the interactive calendar widget in chat for user approval
+- Are NOT shown in the main calendar until approved
+- Require user interaction (approve/reject) before becoming confirmed
+- Are perfect for recommendations and proposals
+
+If you want to create confirmed events directly, use `create_calendar_event` instead.
 
 ## Parameters
 

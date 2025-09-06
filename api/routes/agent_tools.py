@@ -1000,6 +1000,174 @@ async def suggest_user_calendar_event(request: ToolRequest, db: Session = Depend
         )
 
 
+@router.post("/delete_calendar_events_bulk", response_model=ToolResponse)
+async def delete_user_calendar_events_bulk(request: ToolRequest, db: Session = Depends(get_db)):
+    """
+    Delete multiple calendar events based on filters (date range, event type, etc.)
+    """
+    try:
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User authentication failed",
+                error="auth_failed"
+            )
+        
+        # Parse parameters
+        start_date = request.parameters.get("start_date")
+        end_date = request.parameters.get("end_date")
+        event_type = request.parameters.get("event_type")
+        status = request.parameters.get("status")
+        event_ids = request.parameters.get("event_ids", [])  # List of specific event IDs
+        
+        # Build query for user's events only
+        query = db.query(CalendarEvent).filter(CalendarEvent.user_id == user_uuid)
+        
+        # Apply filters
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                # For date-only filtering, check if event starts on or after the start date
+                query = query.filter(CalendarEvent.start_datetime >= start_dt)
+            except ValueError:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid start_date format: {start_date}. Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)",
+                    error="invalid_date_format"
+                )
+        
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                # For end date, include events that start before the end of the day
+                if 'T' not in end_date:  # If only date provided, add end of day
+                    from datetime import timedelta
+                    end_dt = end_dt.replace(hour=23, minute=59, second=59)
+                query = query.filter(CalendarEvent.start_datetime <= end_dt)
+            except ValueError:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid end_date format: {end_date}. Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)",
+                    error="invalid_date_format"
+                )
+        
+        if event_type:
+            query = query.filter(CalendarEvent.event_type == event_type)
+        
+        if status:
+            query = query.filter(CalendarEvent.status == status)
+        
+        if event_ids:
+            # If specific event IDs provided, filter by those
+            try:
+                event_uuids = [uuid.UUID(eid) for eid in event_ids]
+                query = query.filter(CalendarEvent.id.in_(event_uuids))
+            except ValueError as e:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid event ID format in list: {str(e)}",
+                    error="invalid_event_ids"
+                )
+        
+        # Get events to be deleted (for logging and response)
+        events_to_delete = query.all()
+        
+        if not events_to_delete:
+            filter_desc = []
+            if start_date:
+                filter_desc.append(f"from {start_date}")
+            if end_date:
+                filter_desc.append(f"until {end_date}")
+            if event_type:
+                filter_desc.append(f"of type '{event_type}'")
+            if status:
+                filter_desc.append(f"with status '{status}'")
+            if event_ids:
+                filter_desc.append(f"with specific IDs")
+            
+            content = f"No calendar events found to delete"
+            if filter_desc:
+                content += f" {' '.join(filter_desc)}"
+            content += "."
+            
+            return ToolResponse(
+                success=True,
+                content=content,
+                metadata={"deleted_count": 0, "filters_applied": filter_desc}
+            )
+        
+        # Store event info for response
+        deleted_events = []
+        for event in events_to_delete:
+            deleted_events.append({
+                "id": str(event.id),
+                "title": event.title,
+                "start_datetime": event.start_datetime.isoformat(),
+                "event_type": event.event_type
+            })
+        
+        # Delete the events
+        delete_count = query.delete(synchronize_session=False)
+        db.commit()
+        
+        # Create response content
+        filter_desc = []
+        if start_date:
+            filter_desc.append(f"from {start_date}")
+        if end_date:
+            filter_desc.append(f"until {end_date}")
+        if event_type:
+            filter_desc.append(f"of type '{event_type}'")
+        if status:
+            filter_desc.append(f"with status '{status}'")
+        if event_ids:
+            filter_desc.append(f"with specific IDs")
+        
+        content = f"Successfully deleted {delete_count} calendar events"
+        if filter_desc:
+            content += f" {' '.join(filter_desc)}"
+        content += "."
+        
+        if delete_count <= 5:  # Show details for small numbers
+            event_titles = [evt["title"] for evt in deleted_events]
+            content += f"\n\nDeleted events: {', '.join(event_titles)}"
+        
+        logger.info("Bulk calendar events deleted", 
+                   user_id=request.user_id,
+                   deleted_count=delete_count,
+                   start_date=start_date,
+                   end_date=end_date,
+                   event_type=event_type,
+                   status=status)
+        
+        return ToolResponse(
+            success=True,
+            content=content,
+            metadata={
+                "deleted_count": delete_count,
+                "deleted_events": deleted_events,
+                "filters_applied": {
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "event_type": event_type,
+                    "status": status,
+                    "event_ids": event_ids
+                }
+            }
+        )
+        
+    except Exception as e:
+        logger.error("Bulk delete calendar events failed", error=str(e), user_id=request.user_id)
+        return ToolResponse(
+            success=False,
+            content=f"Failed to delete calendar events: {str(e)}",
+            error=str(e)
+        )
+
+
 @router.post("/show_suggested_events_carousel", response_model=ToolResponse)
 async def show_suggested_events_carousel(request: ToolRequest, db: Session = Depends(get_db)):
     """
@@ -1244,6 +1412,39 @@ async def get_available_tools():
                     }
                 },
                 "required": ["event_id"]
+            }
+        },
+        {
+            "name": "delete_calendar_events_bulk",
+            "description": "Delete multiple calendar events based on filters like date range, event type, or status. Perfect for requests like 'delete all events from tomorrow' or 'delete all activities this week'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "Delete events from this date onwards (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "end_date": {
+                        "type": "string", 
+                        "description": "Delete events until this date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "description": "Delete only events of this type: flight, accommodation, activity, transport, dining, wellness"
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Delete only events with this status: confirmed, tentative, cancelled, suggested"
+                    },
+                    "event_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Delete specific events by their IDs (optional)"
+                    }
+                },
+                "required": []
             }
         },
         {
