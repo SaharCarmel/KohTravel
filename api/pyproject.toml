@@ -25,4 +25,5 @@ dependencies = [
     "authlib>=1.6.3",
     "fastapi-nextauth-jwt>=2.1.1",
     "hkdf>=0.0.3",
+    "httpx>=0.28.1",
 ]

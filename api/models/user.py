@@ -15,6 +15,7 @@ class User(Base):
     
     # Relationships
     documents = relationship("Document", back_populates="user", cascade="all, delete-orphan")
+    calendar_events = relationship("CalendarEvent", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email})>"

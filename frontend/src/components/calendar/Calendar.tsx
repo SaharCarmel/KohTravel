@@ -1,0 +1,574 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, isSameMonth, isSameDay, isToday, startOfDay, endOfDay, addWeeks, subWeeks, addMonths, subMonths, eachHourOfInterval, startOfHour } from "date-fns";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import { calendarAPI, type CalendarEvent, type EventType } from "@/lib/calendar-api";
+import { AddEventDialog } from "./AddEventDialog";
+
+// Convert API event to display format
+const convertEvent = (apiEvent: CalendarEvent) => {
+  const startDate = new Date(apiEvent.start_datetime);
+  return {
+    id: apiEvent.id,
+    title: apiEvent.title,
+    date: startDate,
+    time: format(startDate, "HH:mm"),
+    type: apiEvent.event_type,
+    color: apiEvent.color || getDefaultColor(apiEvent.event_type),
+    description: apiEvent.description || apiEvent.location || '',
+    status: apiEvent.status,
+    isSuggested: apiEvent.status === 'suggested',
+    suggestionReason: apiEvent.suggestion_reason,
+    suggestionConfidence: apiEvent.suggestion_confidence,
+  };
+};
+
+const getDefaultColor = (eventType: string) => {
+  const colors: Record<string, string> = {
+    "flight": "bg-blue-500",
+    "accommodation": "bg-green-500",
+    "activity": "bg-purple-500",
+    "transport": "bg-cyan-500",
+    "dining": "bg-yellow-500",
+    "wellness": "bg-pink-500"
+  };
+  return colors[eventType] || "bg-gray-500";
+};
+
+type Event = ReturnType<typeof convertEvent>;
+type ViewMode = 'month' | 'week' | 'day';
+
+export function Calendar() {
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('month');
+  const [events, setEvents] = useState<Event[]>([]);
+  const [eventTypes, setEventTypes] = useState<EventType[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isAddEventDialogOpen, setIsAddEventDialogOpen] = useState(false);
+  const [showSuggestedEvents, setShowSuggestedEvents] = useState(true);
+
+  // Fetch events from API
+  const fetchEvents = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // Get date range based on current view mode
+      let startDate: Date, endDate: Date;
+      
+      if (viewMode === 'month') {
+        startDate = startOfWeek(startOfMonth(currentDate));
+        endDate = endOfWeek(endOfMonth(currentDate));
+      } else if (viewMode === 'week') {
+        startDate = startOfWeek(currentDate);
+        endDate = endOfWeek(currentDate);
+      } else {
+        startDate = startOfDay(currentDate);
+        endDate = endOfDay(currentDate);
+      }
+      
+      const apiEvents = await calendarAPI.getEvents({
+        start_date: format(startDate, 'yyyy-MM-dd'),
+        end_date: format(endDate, 'yyyy-MM-dd'),
+      });
+      
+      const convertedEvents = apiEvents.map(convertEvent);
+      setEvents(convertedEvents);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch events');
+      console.error('Error fetching events:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch event types
+  const fetchEventTypes = async () => {
+    try {
+      const response = await calendarAPI.getEventTypes();
+      setEventTypes(response.event_types);
+    } catch (err) {
+      console.error('Error fetching event types:', err);
+    }
+  };
+
+  // Load data on mount and when view changes
+  useEffect(() => {
+    fetchEvents();
+  }, [currentDate, viewMode]);
+
+  useEffect(() => {
+    fetchEventTypes();
+  }, []);
+
+  // Listen for calendar refresh events from chat component
+  useEffect(() => {
+    const handleCalendarRefresh = () => {
+      fetchEvents();
+    };
+    
+    window.addEventListener('calendar-refresh', handleCalendarRefresh);
+    return () => window.removeEventListener('calendar-refresh', handleCalendarRefresh);
+  }, [fetchEvents]);
+
+  // Get events for a specific date
+  const getEventsForDate = (date: Date): Event[] => {
+    return events.filter(event => {
+      const matchesDate = isSameDay(event.date, date);
+      const shouldShow = showSuggestedEvents || !event.isSuggested;
+      return matchesDate && shouldShow;
+    });
+  };
+
+  // Navigate dates based on view mode
+  const goToPrevious = () => {
+    if (viewMode === 'month') {
+      setCurrentDate(prev => subMonths(prev, 1));
+    } else if (viewMode === 'week') {
+      setCurrentDate(prev => subWeeks(prev, 1));
+    } else {
+      setCurrentDate(prev => addDays(prev, -1));
+    }
+  };
+
+  const goToNext = () => {
+    if (viewMode === 'month') {
+      setCurrentDate(prev => addMonths(prev, 1));
+    } else if (viewMode === 'week') {
+      setCurrentDate(prev => addWeeks(prev, 1));
+    } else {
+      setCurrentDate(prev => addDays(prev, 1));
+    }
+  };
+
+  // Get current view title
+  const getViewTitle = () => {
+    if (viewMode === 'month') {
+      return format(currentDate, "MMMM yyyy");
+    } else if (viewMode === 'week') {
+      const weekStart = startOfWeek(currentDate);
+      const weekEnd = endOfWeek(currentDate);
+      return `${format(weekStart, "MMM d")} - ${format(weekEnd, "MMM d, yyyy")}`;
+    } else {
+      return format(currentDate, "EEEE, MMMM d, yyyy");
+    }
+  };
+
+  // Render month view
+  const renderMonthView = () => {
+    const monthStart = startOfMonth(currentDate);
+    const monthEnd = endOfMonth(monthStart);
+    const startDate = startOfWeek(monthStart);
+    const endDate = endOfWeek(monthEnd);
+    
+    const dateFormat = "d";
+    const rows = [];
+    let days = [];
+    let day = startDate;
+
+    while (day <= endDate) {
+      for (let i = 0; i < 7; i++) {
+        const dayEvents = getEventsForDate(day);
+        const isCurrentMonth = isSameMonth(day, monthStart);
+        const isSelected = selectedDate && isSameDay(day, selectedDate);
+        const isTodayDate = isToday(day);
+        
+        days.push(
+          <div
+            key={day.toString()}
+            className={cn(
+              "min-h-32 p-1 border border-gray-200 cursor-pointer transition-colors",
+              !isCurrentMonth && "bg-gray-50 text-gray-400",
+              isSelected && "bg-blue-50 border-blue-300",
+              isTodayDate && "bg-yellow-50 border-yellow-300",
+              "hover:bg-gray-50"
+            )}
+            onClick={() => setSelectedDate(day)}
+          >
+            <div className="flex justify-between items-start mb-1">
+              <span className={cn(
+                "text-sm font-medium",
+                isTodayDate && "text-yellow-600 font-bold",
+                !isCurrentMonth && "text-gray-400"
+              )}>
+                {format(day, dateFormat)}
+              </span>
+              {dayEvents.length > 0 && (
+                <Badge variant="secondary" className="text-xs px-1 py-0">
+                  {dayEvents.length}
+                </Badge>
+              )}
+            </div>
+            <div className="space-y-1">
+              {dayEvents.slice(0, 3).map((event) => (
+                <div
+                  key={event.id}
+                  className={cn(
+                    "text-xs p-1 rounded text-white truncate relative",
+                    event.color,
+                    event.isSuggested && "opacity-70 border-2 border-dashed border-white/50"
+                  )}
+                  title={`${event.time} - ${event.title}${event.isSuggested ? ' (Suggested)' : ''}`}
+                >
+                  {event.isSuggested && (
+                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full border border-white" />
+                  )}
+                  {event.time} {event.title}
+                </div>
+              ))}
+              {dayEvents.length > 3 && (
+                <div className="text-xs text-gray-500 font-medium">
+                  +{dayEvents.length - 3} more
+                </div>
+              )}
+            </div>
+          </div>
+        );
+        day = addDays(day, 1);
+      }
+      rows.push(
+        <div key={day.toString()} className="grid grid-cols-7">
+          {days}
+        </div>
+      );
+      days = [];
+    }
+
+    return (
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        {rows}
+      </div>
+    );
+  };
+
+  // Render week view
+  const renderWeekView = () => {
+    const weekStart = startOfWeek(currentDate);
+    const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+
+    return (
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <div className="grid grid-cols-7 border-b">
+          {weekDays.map((day) => {
+            const dayEvents = getEventsForDate(day);
+            const isSelected = selectedDate && isSameDay(day, selectedDate);
+            const isTodayDate = isToday(day);
+            
+            return (
+              <div
+                key={day.toString()}
+                className={cn(
+                  "min-h-96 p-2 border-r border-gray-200 cursor-pointer transition-colors",
+                  isSelected && "bg-blue-50 border-blue-300",
+                  isTodayDate && "bg-yellow-50",
+                  "hover:bg-gray-50"
+                )}
+                onClick={() => setSelectedDate(day)}
+              >
+                <div className="text-center mb-2">
+                  <div className="text-xs font-medium text-gray-500 uppercase">
+                    {format(day, "EEE")}
+                  </div>
+                  <div className={cn(
+                    "text-lg font-medium",
+                    isTodayDate && "text-yellow-600 font-bold"
+                  )}>
+                    {format(day, "d")}
+                  </div>
+                  {dayEvents.length > 0 && (
+                    <Badge variant="secondary" className="text-xs px-1 py-0 mt-1">
+                      {dayEvents.length}
+                    </Badge>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  {dayEvents.map((event) => (
+                    <div
+                      key={event.id}
+                      className={cn(
+                        "text-xs p-2 rounded text-white relative",
+                        event.color,
+                        event.isSuggested && "opacity-70 border-2 border-dashed border-white/50"
+                      )}
+                      title={`${event.description}${event.isSuggested ? ' (Suggested)' : ''}`}
+                    >
+                      {event.isSuggested && (
+                        <div className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full border border-white" />
+                      )}
+                      <div className="font-medium">{event.time}</div>
+                      <div className="truncate">{event.title}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // Render day view
+  const renderDayView = () => {
+    const hours = eachHourOfInterval({
+      start: startOfDay(currentDate),
+      end: endOfDay(currentDate)
+    });
+
+    const dayEvents = getEventsForDate(currentDate);
+
+    return (
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <div className="p-4 border-b bg-gray-50">
+          <div className="text-center">
+            <div className="text-sm font-medium text-gray-500 uppercase">
+              {format(currentDate, "EEEE")}
+            </div>
+            <div className={cn(
+              "text-2xl font-bold",
+              isToday(currentDate) && "text-yellow-600"
+            )}>
+              {format(currentDate, "MMMM d, yyyy")}
+            </div>
+            {dayEvents.length > 0 && (
+              <Badge variant="secondary" className="text-sm px-2 py-1 mt-2">
+                {dayEvents.length} events
+              </Badge>
+            )}
+          </div>
+        </div>
+        
+        <div className="max-h-96 overflow-y-auto">
+          {hours.map((hour) => {
+            const hourEvents = dayEvents.filter(event => {
+              const [eventHour] = event.time.split(':').map(Number);
+              return eventHour === hour.getHours();
+            });
+
+            return (
+              <div key={hour.toString()} className="flex border-b border-gray-100 min-h-16">
+                <div className="w-20 p-2 text-right text-sm text-gray-500 border-r">
+                  {format(hour, "HH:mm")}
+                </div>
+                <div className="flex-1 p-2">
+                  <div className="space-y-1">
+                    {hourEvents.map((event) => (
+                      <div
+                        key={event.id}
+                        className={cn(
+                          "p-2 rounded text-white relative",
+                          event.color,
+                          event.isSuggested && "opacity-70 border-2 border-dashed border-white/50"
+                        )}
+                      >
+                        {event.isSuggested && (
+                          <div className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full border border-white" />
+                        )}
+                        <div className="font-medium">{event.title}</div>
+                        <div className="text-xs opacity-90">{event.description}</div>
+                        {event.isSuggested && (
+                          <div className="text-xs opacity-75 mt-1">Suggested</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  if (error) {
+    return (
+      <Card className="p-8 text-center">
+        <div className="text-red-600 mb-4">
+          <p className="font-semibold">Error loading calendar</p>
+          <p className="text-sm text-gray-600">{error}</p>
+        </div>
+        <Button onClick={fetchEvents} variant="outline">
+          Try Again
+        </Button>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Calendar Header */}
+      <Card className="p-4">
+        {isLoading && (
+          <div className="flex items-center justify-center py-4 mb-4">
+            <Loader2 className="h-5 w-5 animate-spin mr-2" />
+            <span className="text-sm text-gray-600">Loading calendar events...</span>
+          </div>
+        )}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={goToPrevious}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <h2 className="text-xl font-semibold min-w-64 text-center">
+              {getViewTitle()}
+            </h2>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={goToNext}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            {/* View Mode Buttons */}
+            <div className="flex border border-input rounded-md">
+              <Button
+                variant={viewMode === 'month' ? 'default' : 'ghost'}
+                size="sm"
+                className="rounded-r-none border-r"
+                onClick={() => setViewMode('month')}
+              >
+                Month
+              </Button>
+              <Button
+                variant={viewMode === 'week' ? 'default' : 'ghost'}
+                size="sm"
+                className="rounded-none border-r"
+                onClick={() => setViewMode('week')}
+              >
+                Week
+              </Button>
+              <Button
+                variant={viewMode === 'day' ? 'default' : 'ghost'}
+                size="sm"
+                className="rounded-l-none"
+                onClick={() => setViewMode('day')}
+              >
+                Day
+              </Button>
+            </div>
+            
+            <Button 
+              variant={showSuggestedEvents ? 'default' : 'outline'} 
+              size="sm" 
+              onClick={() => setShowSuggestedEvents(!showSuggestedEvents)}
+            >
+              ✨ Suggestions
+            </Button>
+            
+            <Button size="sm" onClick={() => setIsAddEventDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Event
+            </Button>
+          </div>
+        </div>
+
+        {/* Day Headers for Month and Week View */}
+        {(viewMode === 'month' || viewMode === 'week') && (
+          <div className="grid grid-cols-7 mb-2">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+              <div key={day} className="p-2 text-center text-sm font-medium text-gray-500">
+                {day}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Calendar View */}
+        {viewMode === 'month' && renderMonthView()}
+        {viewMode === 'week' && renderWeekView()}
+        {viewMode === 'day' && renderDayView()}
+      </Card>
+
+      {/* Event Details for Selected Date */}
+      {selectedDate && (
+        <Card className="p-4">
+          <h3 className="text-lg font-semibold mb-3">
+            Events for {format(selectedDate, "EEEE, MMMM d, yyyy")}
+          </h3>
+          {getEventsForDate(selectedDate).length === 0 ? (
+            <p className="text-gray-500">No events scheduled for this day.</p>
+          ) : (
+            <div className="space-y-3">
+              {getEventsForDate(selectedDate).map((event) => (
+                <div key={event.id} className={cn(
+                  "flex items-start space-x-3 p-3 border rounded-lg",
+                  event.isSuggested && "border-dashed border-amber-300 bg-amber-50"
+                )}>
+                  <div className={cn("w-3 h-3 rounded-full mt-1", event.color)} />
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium">{event.title}</h4>
+                        {event.isSuggested && (
+                          <Badge variant="secondary" className="text-xs bg-amber-200 text-amber-800">
+                            ✨ Suggested
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="text-sm text-gray-500">{event.time}</span>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">{event.description}</p>
+                    {event.suggestionReason && (
+                      <p className="text-xs text-amber-700 mt-1 italic">
+                        Reason: {event.suggestionReason}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2 mt-2">
+                      <Badge variant="outline" className="text-xs">
+                        {event.type}
+                      </Badge>
+                      {event.suggestionConfidence && (
+                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700">
+                          {event.suggestionConfidence}/10 confidence
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Legend */}
+      <Card className="p-4">
+        <h3 className="text-sm font-medium mb-3">Event Types</h3>
+        <div className="flex flex-wrap gap-3">
+          {eventTypes?.map(({ type, color, label }) => (
+            <div key={type} className="flex items-center space-x-2">
+              <div className={cn("w-3 h-3 rounded-full", color)} />
+              <span className="text-sm">{label}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Add Event Dialog */}
+      <AddEventDialog
+        isOpen={isAddEventDialogOpen}
+        onClose={() => setIsAddEventDialogOpen(false)}
+        onSuccess={() => {
+          fetchEvents(); // Refresh events after creation
+        }}
+        eventTypes={eventTypes}
+        initialDate={selectedDate || currentDate}
+      />
+    </div>
+  );
+}

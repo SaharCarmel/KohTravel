@@ -11,7 +11,9 @@ import structlog
 from database import get_db
 from models.document import Document, DocumentCategory, DocumentQuickRef
 from models.user import User
+from models.calendar_event import CalendarEvent
 import uuid
+from datetime import datetime, date
 
 logger = structlog.get_logger(__name__)
 
@@ -421,6 +423,800 @@ async def get_document_categories(request: ToolRequest, db: Session = Depends(ge
         )
 
 
+@router.post("/get_calendar_events", response_model=ToolResponse)
+async def get_user_calendar_events(request: ToolRequest, db: Session = Depends(get_db)):
+    """
+    Get user's calendar events for travel planning
+    """
+    try:
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User authentication failed",
+                error="auth_failed"
+            )
+        
+        # Parse parameters
+        start_date = request.parameters.get("start_date")
+        end_date = request.parameters.get("end_date")
+        event_type = request.parameters.get("event_type")
+        limit = min(request.parameters.get("limit", 50), 100)  # Cap at 100
+        
+        # Build query
+        query = db.query(CalendarEvent).filter(CalendarEvent.user_id == user_uuid)
+        
+        # Apply filters
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                query = query.filter(CalendarEvent.start_datetime >= start_dt)
+            except ValueError:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid start_date format: {start_date}. Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)",
+                    error="invalid_date_format"
+                )
+        
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                query = query.filter(CalendarEvent.start_datetime <= end_dt)
+            except ValueError:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid end_date format: {end_date}. Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)",
+                    error="invalid_date_format"
+                )
+        
+        if event_type:
+            query = query.filter(CalendarEvent.event_type == event_type)
+        
+        # Execute query
+        events = query.order_by(CalendarEvent.start_datetime).limit(limit).all()
+        
+        # Format events for response
+        event_list = []
+        for event in events:
+            event_data = {
+                "id": str(event.id),
+                "title": event.title,
+                "description": event.description,
+                "location": event.location,
+                "start_datetime": event.start_datetime.isoformat(),
+                "end_datetime": event.end_datetime.isoformat() if event.end_datetime else None,
+                "event_type": event.event_type,
+                "status": event.status,
+                "all_day": event.all_day
+            }
+            event_list.append(event_data)
+        
+        # Create readable content
+        if event_list:
+            content_lines = [f"Found {len(event_list)} calendar events:"]
+            for event in event_list:
+                event_line = f"- {event['title']} ({event['event_type']}) on {event['start_datetime'][:10]}"
+                if event['location']:
+                    event_line += f" at {event['location']}"
+                content_lines.append(event_line)
+            content = "\n".join(content_lines)
+        else:
+            filters_desc = ""
+            if start_date or end_date:
+                filters_desc += f" between {start_date or 'beginning'} and {end_date or 'end'}"
+            if event_type:
+                filters_desc += f" of type '{event_type}'"
+            content = f"No calendar events found{filters_desc}."
+        
+        logger.info("Calendar events retrieved", 
+                   user_id=request.user_id,
+                   event_count=len(event_list),
+                   start_date=start_date,
+                   end_date=end_date,
+                   event_type=event_type)
+        
+        return ToolResponse(
+            success=True,
+            content=content,
+            metadata={
+                "events": event_list,
+                "count": len(event_list),
+                "filters": {
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "event_type": event_type
+                }
+            }
+        )
+        
+    except Exception as e:
+        logger.error("Get calendar events failed", error=str(e), user_id=request.user_id)
+        return ToolResponse(
+            success=False,
+            content=f"Failed to get calendar events: {str(e)}",
+            error=str(e)
+        )
+
+
+@router.post("/create_calendar_event", response_model=ToolResponse)
+async def create_user_calendar_event(request: ToolRequest, db: Session = Depends(get_db)):
+    """
+    Create a new calendar event for the user
+    """
+    try:
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User authentication failed",
+                error="auth_failed"
+            )
+        
+        # Extract required parameters
+        title = request.parameters.get("title")
+        start_datetime = request.parameters.get("start_datetime")
+        event_type = request.parameters.get("event_type", "activity")
+        
+        if not title:
+            return ToolResponse(
+                success=False,
+                content="Event title is required",
+                error="missing_title"
+            )
+        
+        if not start_datetime:
+            return ToolResponse(
+                success=False,
+                content="Event start_datetime is required",
+                error="missing_start_datetime"
+            )
+        
+        # Validate event type
+        valid_types = ["flight", "accommodation", "activity", "transport", "dining", "wellness"]
+        if event_type not in valid_types:
+            return ToolResponse(
+                success=False,
+                content=f"Invalid event_type '{event_type}'. Must be one of: {', '.join(valid_types)}",
+                error="invalid_event_type"
+            )
+        
+        # Parse datetime
+        try:
+            start_dt = datetime.fromisoformat(start_datetime.replace('Z', '+00:00'))
+        except ValueError:
+            return ToolResponse(
+                success=False,
+                content=f"Invalid start_datetime format: {start_datetime}. Use ISO format (YYYY-MM-DDTHH:MM:SS)",
+                error="invalid_datetime_format"
+            )
+        
+        # Parse end_datetime if provided
+        end_dt = None
+        end_datetime = request.parameters.get("end_datetime")
+        if end_datetime:
+            try:
+                end_dt = datetime.fromisoformat(end_datetime.replace('Z', '+00:00'))
+            except ValueError:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid end_datetime format: {end_datetime}. Use ISO format (YYYY-MM-DDTHH:MM:SS)",
+                    error="invalid_datetime_format"
+                )
+        
+        # Set default color based on event type
+        color_map = {
+            "flight": "bg-blue-500",
+            "accommodation": "bg-green-500",
+            "activity": "bg-purple-500",
+            "transport": "bg-cyan-500",
+            "dining": "bg-yellow-500",
+            "wellness": "bg-pink-500"
+        }
+        
+        # Create the event
+        new_event = CalendarEvent(
+            user_id=user_uuid,
+            title=title,
+            description=request.parameters.get("description"),
+            location=request.parameters.get("location"),
+            start_datetime=start_dt,
+            end_datetime=end_dt,
+            all_day=request.parameters.get("all_day", False),
+            event_type=event_type,
+            color=request.parameters.get("color", color_map.get(event_type, "bg-gray-500")),
+            status=request.parameters.get("status", "confirmed"),
+            notes=request.parameters.get("notes"),
+            source="agent_created"
+        )
+        
+        db.add(new_event)
+        db.commit()
+        db.refresh(new_event)
+        
+        # Format response
+        event_data = new_event.to_dict()
+        content = f"Calendar event '{title}' created successfully for {start_dt.strftime('%Y-%m-%d %H:%M')}"
+        if new_event.location:
+            content += f" at {new_event.location}"
+        content += f". Event ID: {event_data['id']}"
+        
+        logger.info("Calendar event created", 
+                   user_id=request.user_id,
+                   event_id=event_data["id"],
+                   title=title,
+                   event_type=event_type)
+        
+        return ToolResponse(
+            success=True,
+            content=content,
+            metadata={"event": event_data}
+        )
+        
+    except Exception as e:
+        logger.error("Create calendar event failed", error=str(e), user_id=request.user_id)
+        return ToolResponse(
+            success=False,
+            content=f"Failed to create calendar event: {str(e)}",
+            error=str(e)
+        )
+
+
+@router.post("/update_calendar_event", response_model=ToolResponse)
+async def update_user_calendar_event(request: ToolRequest, db: Session = Depends(get_db)):
+    """
+    Update an existing calendar event
+    """
+    try:
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User authentication failed",
+                error="auth_failed"
+            )
+        
+        event_id = request.parameters.get("event_id")
+        if not event_id:
+            return ToolResponse(
+                success=False,
+                content="Event ID is required",
+                error="missing_event_id"
+            )
+        
+        # Parse event ID
+        try:
+            event_uuid = uuid.UUID(event_id)
+        except ValueError:
+            return ToolResponse(
+                success=False,
+                content=f"Invalid event ID format: {event_id}",
+                error="invalid_event_id"
+            )
+        
+        # Get the event (user-scoped)
+        event = db.query(CalendarEvent).filter(
+            CalendarEvent.id == event_uuid,
+            CalendarEvent.user_id == user_uuid
+        ).first()
+        
+        if not event:
+            return ToolResponse(
+                success=False,
+                content=f"Calendar event not found or access denied",
+                error="event_not_found"
+            )
+        
+        # Update fields if provided
+        updates = {}
+        for field in ["title", "description", "location", "event_type", "status", "notes", "all_day"]:
+            if field in request.parameters:
+                updates[field] = request.parameters[field]
+        
+        # Handle datetime updates
+        if "start_datetime" in request.parameters:
+            try:
+                start_dt = datetime.fromisoformat(request.parameters["start_datetime"].replace('Z', '+00:00'))
+                updates["start_datetime"] = start_dt
+            except ValueError:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid start_datetime format: {request.parameters['start_datetime']}",
+                    error="invalid_datetime_format"
+                )
+        
+        if "end_datetime" in request.parameters:
+            if request.parameters["end_datetime"]:
+                try:
+                    end_dt = datetime.fromisoformat(request.parameters["end_datetime"].replace('Z', '+00:00'))
+                    updates["end_datetime"] = end_dt
+                except ValueError:
+                    return ToolResponse(
+                        success=False,
+                        content=f"Invalid end_datetime format: {request.parameters['end_datetime']}",
+                        error="invalid_datetime_format"
+                    )
+            else:
+                updates["end_datetime"] = None
+        
+        # Apply updates
+        for field, value in updates.items():
+            setattr(event, field, value)
+        
+        db.commit()
+        db.refresh(event)
+        
+        # Format response
+        event_data = event.to_dict()
+        content = f"Calendar event '{event.title}' updated successfully. Event ID: {event_data['id']}"
+        
+        logger.info("Calendar event updated", 
+                   user_id=request.user_id,
+                   event_id=event_data["id"],
+                   updates=list(updates.keys()))
+        
+        return ToolResponse(
+            success=True,
+            content=content,
+            metadata={"event": event_data, "updated_fields": list(updates.keys())}
+        )
+        
+    except Exception as e:
+        logger.error("Update calendar event failed", error=str(e), user_id=request.user_id)
+        return ToolResponse(
+            success=False,
+            content=f"Failed to update calendar event: {str(e)}",
+            error=str(e)
+        )
+
+
+@router.post("/delete_calendar_event", response_model=ToolResponse)
+async def delete_user_calendar_event(request: ToolRequest, db: Session = Depends(get_db)):
+    """
+    Delete a calendar event
+    """
+    try:
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User authentication failed",
+                error="auth_failed"
+            )
+        
+        event_id = request.parameters.get("event_id")
+        if not event_id:
+            return ToolResponse(
+                success=False,
+                content="Event ID is required",
+                error="missing_event_id"
+            )
+        
+        # Parse event ID
+        try:
+            event_uuid = uuid.UUID(event_id)
+        except ValueError:
+            return ToolResponse(
+                success=False,
+                content=f"Invalid event ID format: {event_id}",
+                error="invalid_event_id"
+            )
+        
+        # Get the event (user-scoped)
+        event = db.query(CalendarEvent).filter(
+            CalendarEvent.id == event_uuid,
+            CalendarEvent.user_id == user_uuid
+        ).first()
+        
+        if not event:
+            return ToolResponse(
+                success=False,
+                content=f"Calendar event not found or access denied",
+                error="event_not_found"
+            )
+        
+        event_title = event.title
+        event_id_str = str(event.id)
+        
+        # Delete the event
+        db.delete(event)
+        db.commit()
+        
+        content = f"Calendar event '{event_title}' deleted successfully."
+        
+        logger.info("Calendar event deleted", 
+                   user_id=request.user_id,
+                   event_id=event_id_str,
+                   title=event_title)
+        
+        return ToolResponse(
+            success=True,
+            content=content,
+            metadata={"deleted_event_id": event_id_str, "deleted_title": event_title}
+        )
+        
+    except Exception as e:
+        logger.error("Delete calendar event failed", error=str(e), user_id=request.user_id)
+        return ToolResponse(
+            success=False,
+            content=f"Failed to delete calendar event: {str(e)}",
+            error=str(e)
+        )
+
+
+@router.post("/suggest_calendar_event", response_model=ToolResponse)
+async def suggest_user_calendar_event(request: ToolRequest, db: Session = Depends(get_db)):
+    """
+    Suggest a new calendar event for the user's review and approval
+    This creates a suggested event that appears in the chat carousel and calendar with special styling
+    """
+    try:
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User authentication failed",
+                error="auth_failed"
+            )
+        
+        # Extract required parameters
+        title = request.parameters.get("title")
+        start_datetime = request.parameters.get("start_datetime")
+        event_type = request.parameters.get("event_type", "activity")
+        suggestion_reason = request.parameters.get("suggestion_reason")
+        suggestion_confidence = request.parameters.get("suggestion_confidence", 7)
+        
+        if not title:
+            return ToolResponse(
+                success=False,
+                content="Event title is required",
+                error="missing_title"
+            )
+        
+        if not start_datetime:
+            return ToolResponse(
+                success=False,
+                content="Event start_datetime is required",
+                error="missing_start_datetime"
+            )
+            
+        if not suggestion_reason:
+            return ToolResponse(
+                success=False,
+                content="Suggestion reason is required for suggested events",
+                error="missing_suggestion_reason"
+            )
+        
+        # Validate event type
+        valid_types = ["flight", "accommodation", "activity", "transport", "dining", "wellness"]
+        if event_type not in valid_types:
+            return ToolResponse(
+                success=False,
+                content=f"Invalid event_type '{event_type}'. Must be one of: {', '.join(valid_types)}",
+                error="invalid_event_type"
+            )
+        
+        # Validate confidence score
+        if not isinstance(suggestion_confidence, int) or not (1 <= suggestion_confidence <= 10):
+            return ToolResponse(
+                success=False,
+                content="Suggestion confidence must be an integer between 1 and 10",
+                error="invalid_confidence"
+            )
+        
+        # Parse datetime
+        try:
+            start_dt = datetime.fromisoformat(start_datetime.replace('Z', '+00:00'))
+        except ValueError:
+            return ToolResponse(
+                success=False,
+                content=f"Invalid start_datetime format: {start_datetime}. Use ISO format (YYYY-MM-DDTHH:MM:SS)",
+                error="invalid_datetime_format"
+            )
+        
+        # Parse end_datetime if provided
+        end_dt = None
+        end_datetime = request.parameters.get("end_datetime")
+        if end_datetime:
+            try:
+                end_dt = datetime.fromisoformat(end_datetime.replace('Z', '+00:00'))
+            except ValueError:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid end_datetime format: {end_datetime}. Use ISO format (YYYY-MM-DDTHH:MM:SS)",
+                    error="invalid_datetime_format"
+                )
+        
+        # Set default color based on event type
+        color_map = {
+            "flight": "bg-blue-500",
+            "accommodation": "bg-green-500",
+            "activity": "bg-purple-500", 
+            "transport": "bg-cyan-500",
+            "dining": "bg-yellow-500",
+            "wellness": "bg-pink-500"
+        }
+        
+        # Create the suggested event
+        suggested_event = CalendarEvent(
+            user_id=user_uuid,
+            title=title,
+            description=request.parameters.get("description"),
+            location=request.parameters.get("location"),
+            start_datetime=start_dt,
+            end_datetime=end_dt,
+            all_day=request.parameters.get("all_day", False),
+            event_type=event_type,
+            color=request.parameters.get("color", color_map.get(event_type, "bg-gray-500")),
+            status="suggested",  # Always suggested for this endpoint
+            notes=request.parameters.get("notes"),
+            source="agent_suggested",
+            suggestion_reason=suggestion_reason,
+            suggestion_confidence=suggestion_confidence,
+            suggested_by="agent"
+        )
+        
+        db.add(suggested_event)
+        db.commit()
+        db.refresh(suggested_event)
+        
+        # Format response
+        event_data = suggested_event.to_dict()
+        content = f"I've suggested a calendar event '{title}' for {start_dt.strftime('%Y-%m-%d %H:%M')}"
+        if suggested_event.location:
+            content += f" at {suggested_event.location}"
+        content += f". You can review and approve this suggestion in the chat interface or calendar view."
+        content += f"\n\nReason: {suggestion_reason}"
+        content += f"\nConfidence: {suggestion_confidence}/10"
+        
+        logger.info("Calendar event suggested", 
+                   user_id=request.user_id,
+                   event_id=event_data["id"],
+                   title=title,
+                   event_type=event_type,
+                   confidence=suggestion_confidence)
+        
+        return ToolResponse(
+            success=True,
+            content=content,
+            metadata={"suggested_event": event_data}
+        )
+        
+    except Exception as e:
+        logger.error("Suggest calendar event failed", error=str(e), user_id=request.user_id)
+        return ToolResponse(
+            success=False,
+            content=f"Failed to suggest calendar event: {str(e)}",
+            error=str(e)
+        )
+
+
+@router.post("/delete_calendar_events_bulk", response_model=ToolResponse)
+async def delete_user_calendar_events_bulk(request: ToolRequest, db: Session = Depends(get_db)):
+    """
+    Delete multiple calendar events based on filters (date range, event type, etc.)
+    """
+    try:
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User authentication failed",
+                error="auth_failed"
+            )
+        
+        # Parse parameters
+        start_date = request.parameters.get("start_date")
+        end_date = request.parameters.get("end_date")
+        event_type = request.parameters.get("event_type")
+        status = request.parameters.get("status")
+        event_ids = request.parameters.get("event_ids", [])  # List of specific event IDs
+        
+        # Build query for user's events only
+        query = db.query(CalendarEvent).filter(CalendarEvent.user_id == user_uuid)
+        
+        # Apply filters
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                # For date-only filtering, check if event starts on or after the start date
+                query = query.filter(CalendarEvent.start_datetime >= start_dt)
+            except ValueError:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid start_date format: {start_date}. Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)",
+                    error="invalid_date_format"
+                )
+        
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                # For end date, include events that start before the end of the day
+                if 'T' not in end_date:  # If only date provided, add end of day
+                    from datetime import timedelta
+                    end_dt = end_dt.replace(hour=23, minute=59, second=59)
+                query = query.filter(CalendarEvent.start_datetime <= end_dt)
+            except ValueError:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid end_date format: {end_date}. Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)",
+                    error="invalid_date_format"
+                )
+        
+        if event_type:
+            query = query.filter(CalendarEvent.event_type == event_type)
+        
+        if status:
+            query = query.filter(CalendarEvent.status == status)
+        
+        if event_ids:
+            # If specific event IDs provided, filter by those
+            try:
+                event_uuids = [uuid.UUID(eid) for eid in event_ids]
+                query = query.filter(CalendarEvent.id.in_(event_uuids))
+            except ValueError as e:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid event ID format in list: {str(e)}",
+                    error="invalid_event_ids"
+                )
+        
+        # Get events to be deleted (for logging and response)
+        events_to_delete = query.all()
+        
+        if not events_to_delete:
+            filter_desc = []
+            if start_date:
+                filter_desc.append(f"from {start_date}")
+            if end_date:
+                filter_desc.append(f"until {end_date}")
+            if event_type:
+                filter_desc.append(f"of type '{event_type}'")
+            if status:
+                filter_desc.append(f"with status '{status}'")
+            if event_ids:
+                filter_desc.append(f"with specific IDs")
+            
+            content = f"No calendar events found to delete"
+            if filter_desc:
+                content += f" {' '.join(filter_desc)}"
+            content += "."
+            
+            return ToolResponse(
+                success=True,
+                content=content,
+                metadata={"deleted_count": 0, "filters_applied": filter_desc}
+            )
+        
+        # Store event info for response
+        deleted_events = []
+        for event in events_to_delete:
+            deleted_events.append({
+                "id": str(event.id),
+                "title": event.title,
+                "start_datetime": event.start_datetime.isoformat(),
+                "event_type": event.event_type
+            })
+        
+        # Delete the events
+        delete_count = query.delete(synchronize_session=False)
+        db.commit()
+        
+        # Create response content
+        filter_desc = []
+        if start_date:
+            filter_desc.append(f"from {start_date}")
+        if end_date:
+            filter_desc.append(f"until {end_date}")
+        if event_type:
+            filter_desc.append(f"of type '{event_type}'")
+        if status:
+            filter_desc.append(f"with status '{status}'")
+        if event_ids:
+            filter_desc.append(f"with specific IDs")
+        
+        content = f"Successfully deleted {delete_count} calendar events"
+        if filter_desc:
+            content += f" {' '.join(filter_desc)}"
+        content += "."
+        
+        if delete_count <= 5:  # Show details for small numbers
+            event_titles = [evt["title"] for evt in deleted_events]
+            content += f"\n\nDeleted events: {', '.join(event_titles)}"
+        
+        logger.info("Bulk calendar events deleted", 
+                   user_id=request.user_id,
+                   deleted_count=delete_count,
+                   start_date=start_date,
+                   end_date=end_date,
+                   event_type=event_type,
+                   status=status)
+        
+        return ToolResponse(
+            success=True,
+            content=content,
+            metadata={
+                "deleted_count": delete_count,
+                "deleted_events": deleted_events,
+                "filters_applied": {
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "event_type": event_type,
+                    "status": status,
+                    "event_ids": event_ids
+                }
+            }
+        )
+        
+    except Exception as e:
+        logger.error("Bulk delete calendar events failed", error=str(e), user_id=request.user_id)
+        return ToolResponse(
+            success=False,
+            content=f"Failed to delete calendar events: {str(e)}",
+            error=str(e)
+        )
+
+
+@router.post("/show_suggested_events_carousel", response_model=ToolResponse)
+async def show_suggested_events_carousel(request: ToolRequest, db: Session = Depends(get_db)):
+    """
+    Signal the frontend to show the suggested events carousel
+    Use this after creating event suggestions to prompt user for approval
+    """
+    try:
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User authentication failed",
+                error="auth_failed"
+            )
+        
+        # Get current suggested events count
+        suggested_count = db.query(CalendarEvent).filter(
+            CalendarEvent.user_id == user_uuid,
+            CalendarEvent.status == "suggested"
+        ).count()
+        
+        content = f"Showing suggested events carousel with {suggested_count} suggestions for your review."
+        if suggested_count == 0:
+            content = "No suggested events to display. Create some suggestions first using suggest_calendar_event."
+        
+        logger.info("Showing suggested events carousel", 
+                   user_id=request.user_id,
+                   suggested_count=suggested_count)
+        
+        return ToolResponse(
+            success=True,
+            content=content,
+            metadata={
+                "action": "show_carousel",
+                "suggested_count": suggested_count
+            }
+        )
+        
+    except Exception as e:
+        logger.error("Show carousel failed", error=str(e), user_id=request.user_id)
+        return ToolResponse(
+            success=False,
+            content=f"Failed to show carousel: {str(e)}",
+            error=str(e)
+        )
+
+
 @router.get("/available_tools", response_model=List[Dict[str, Any]])
 async def get_available_tools():
     """
@@ -476,6 +1272,234 @@ async def get_available_tools():
         {
             "name": "get_document_categories",
             "description": "Get all available document categories to understand what types of documents exist",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "get_calendar_events",
+            "description": "Get user's calendar events for travel planning, with optional date and type filtering",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "Filter events from this date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "Filter events until this date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "description": "Filter by event type: flight, accommodation, activity, transport, dining, wellness"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of events to return (default: 50, max: 100)"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "create_calendar_event",
+            "description": "Create a new calendar event for travel planning",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Event title"
+                    },
+                    "start_datetime": {
+                        "type": "string",
+                        "description": "Event start date and time (ISO format: YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "end_datetime": {
+                        "type": "string",
+                        "description": "Event end date and time (optional, ISO format: YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "description": "Event type: flight, accommodation, activity, transport, dining, wellness (default: activity)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Event description (optional)"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Event location (optional)"
+                    },
+                    "all_day": {
+                        "type": "boolean",
+                        "description": "Whether this is an all-day event (default: false)"
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Event status: confirmed, tentative, cancelled (default: confirmed)"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Additional notes (optional)"
+                    }
+                },
+                "required": ["title", "start_datetime"]
+            }
+        },
+        {
+            "name": "update_calendar_event",
+            "description": "Update an existing calendar event",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id": {
+                        "type": "string",
+                        "description": "ID of the event to update"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Event title (optional)"
+                    },
+                    "start_datetime": {
+                        "type": "string",
+                        "description": "Event start date and time (optional, ISO format: YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "end_datetime": {
+                        "type": "string",
+                        "description": "Event end date and time (optional, ISO format: YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "description": "Event type: flight, accommodation, activity, transport, dining, wellness (optional)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Event description (optional)"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Event location (optional)"
+                    },
+                    "all_day": {
+                        "type": "boolean",
+                        "description": "Whether this is an all-day event (optional)"
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Event status: confirmed, tentative, cancelled (optional)"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Additional notes (optional)"
+                    }
+                },
+                "required": ["event_id"]
+            }
+        },
+        {
+            "name": "delete_calendar_event",
+            "description": "Delete a calendar event",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id": {
+                        "type": "string",
+                        "description": "ID of the event to delete"
+                    }
+                },
+                "required": ["event_id"]
+            }
+        },
+        {
+            "name": "delete_calendar_events_bulk",
+            "description": "Delete multiple calendar events based on filters like date range, event type, or status. Perfect for requests like 'delete all events from tomorrow' or 'delete all activities this week'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "Delete events from this date onwards (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "end_date": {
+                        "type": "string", 
+                        "description": "Delete events until this date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "description": "Delete only events of this type: flight, accommodation, activity, transport, dining, wellness"
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Delete only events with this status: confirmed, tentative, cancelled, suggested"
+                    },
+                    "event_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Delete specific events by their IDs (optional)"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "suggest_calendar_event",
+            "description": "Suggest a new calendar event that appears in the chat carousel for user approval. Use this when you want to propose events based on user documents or conversation context.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Event title"
+                    },
+                    "start_datetime": {
+                        "type": "string",
+                        "description": "Event start date and time (ISO format: YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "end_datetime": {
+                        "type": "string",
+                        "description": "Event end date and time (optional, ISO format: YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "description": "Event type: flight, accommodation, activity, transport, dining, wellness (default: activity)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Event description (optional)"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Event location (optional)"
+                    },
+                    "all_day": {
+                        "type": "boolean",
+                        "description": "Whether this is an all-day event (default: false)"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Additional notes (optional)"
+                    },
+                    "suggestion_reason": {
+                        "type": "string",
+                        "description": "Required: Explain why you're suggesting this event to help the user understand the recommendation"
+                    },
+                    "suggestion_confidence": {
+                        "type": "integer",
+                        "description": "Confidence level from 1-10 for this suggestion (default: 7)"
+                    }
+                },
+                "required": ["title", "start_datetime", "suggestion_reason"]
+            }
+        },
+        {
+            "name": "show_suggested_events_carousel",
+            "description": "Display the suggested events carousel in the chat interface. Use this after creating event suggestions to prompt the user for approval/rejection.",
             "parameters": {
                 "type": "object",
                 "properties": {},

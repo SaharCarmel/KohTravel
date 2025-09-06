@@ -17,8 +17,12 @@ import {
   Hotel,
   MapPin,
   Calendar,
-  FileText
+  FileText,
+  CalendarDays,
+  X
 } from 'lucide-react'
+import { InteractiveCalendarWidget } from '@/components/calendar/InteractiveCalendarWidget'
+import { calendarAPI, type CalendarEvent } from '@/lib/calendar-api'
 
 interface Message {
   id: string
@@ -74,8 +78,14 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [showCalendarWidget, setShowCalendarWidget] = useState(false)
+  const [calendarFeedbacks, setCalendarFeedbacks] = useState<Array<{eventId: string, feedback: string, rating: 'like' | 'dislike'}>>([])
+  const [widgetKey, setWidgetKey] = useState(0) // Force re-render of widget
+  const [approvedEvents, setApprovedEvents] = useState<Set<string>>(new Set())
+  const [rejectedEvents, setRejectedEvents] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sessionId = useRef<string>('')
+  const sendMessageRef = useRef<((message?: string) => void) | null>(null)
 
   useEffect(() => {
     sessionId.current = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
@@ -84,6 +94,202 @@ export default function ChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Handle calendar widget visibility (shown when agent creates suggestions or user manually toggles)
+  const showCalendarWidgetHandler = useCallback(() => {
+    setShowCalendarWidget(true)
+    setWidgetKey(prev => prev + 1) // Force refresh
+    // Note: DON'T reset approved/rejected events - keep them persistent
+    // across widget refreshes so previously approved events don't reappear
+    // Only reset calendar feedbacks for the new session
+    setCalendarFeedbacks([])
+  }, [])
+
+  // Toggle calendar widget visibility for manual control
+  const toggleCalendarWidget = useCallback(() => {
+    if (showCalendarWidget) {
+      // Close without going through the review process
+      setShowCalendarWidget(false)
+    } else {
+      // Open the widget
+      showCalendarWidgetHandler()
+    }
+  }, [showCalendarWidget, showCalendarWidgetHandler])
+
+  // Handle event approval
+  const handleEventApproved = useCallback((eventId: string, approvedEvent: CalendarEvent) => {
+    // Track approved event
+    setApprovedEvents(prev => new Set([...prev, eventId]))
+    
+    // Note: No success message here - widget stays open for continued interaction
+    // Success will be summarized when widget is closed
+  }, [])
+
+  // Handle event rejection
+  const handleEventRejected = useCallback((eventId: string, feedback?: string) => {
+    // Track rejected event
+    setRejectedEvents(prev => new Set([...prev, eventId]))
+    
+    if (feedback) {
+      // Store feedback for agent context
+      setCalendarFeedbacks(prev => [...prev, { eventId, feedback, rating: 'dislike' }])
+    }
+    
+    // Note: No feedback message here - widget stays open for continued interaction
+    // Feedback will be summarized when widget is closed
+  }, [])
+
+  // Handle event feedback
+  const handleEventFeedback = useCallback((eventId: string, feedback: string, rating: 'like' | 'dislike') => {
+    // Store feedback for agent context
+    setCalendarFeedbacks(prev => {
+      const filtered = prev.filter(f => f.eventId !== eventId);
+      return [...filtered, { eventId, feedback, rating }];
+    });
+    
+    // Note: No feedback message here - widget stays open for continued interaction
+    // Feedback will be summarized when widget is closed
+  }, [])
+
+  // Handle calendar widget closure  
+  const handleCalendarWidgetClosed = useCallback((allFeedbacks: Array<{eventId: string, comment: string, rating: 'like' | 'dislike' | null, eventTitle?: string}>) => {
+    // Close the widget
+    setShowCalendarWidget(false);
+    
+    // Update calendar feedbacks with all feedback
+    setCalendarFeedbacks(allFeedbacks);
+    
+    // Generate summary message based on feedback and approvals
+    const feedbackCount = allFeedbacks.length;
+    const likes = allFeedbacks.filter(f => f.rating === 'like').length;
+    const dislikes = allFeedbacks.filter(f => f.rating === 'dislike').length;
+    const comments = allFeedbacks.filter(f => f.comment && f.comment.trim()).length;
+    
+    let summaryContent = `📋 Thanks for reviewing the suggestions!`;
+    
+    if (feedbackCount > 0 || approvedEvents.size > 0 || rejectedEvents.size > 0) {
+      const actionParts = [];
+      
+      if (approvedEvents.size > 0) {
+        actionParts.push(`${approvedEvents.size} event${approvedEvents.size > 1 ? 's' : ''} added to calendar`);
+      }
+      
+      if (rejectedEvents.size > 0) {
+        actionParts.push(`${rejectedEvents.size} event${rejectedEvents.size > 1 ? 's' : ''} skipped`);
+      }
+      
+      if (likes > 0) {
+        actionParts.push(`${likes} positive rating${likes > 1 ? 's' : ''}`);
+      }
+      
+      if (dislikes > 0) {
+        actionParts.push(`${dislikes} negative rating${dislikes > 1 ? 's' : ''}`);
+      }
+      
+      if (comments > 0) {
+        actionParts.push(`${comments} detailed comment${comments > 1 ? 's' : ''}`);
+      }
+      
+      if (actionParts.length > 0) {
+        summaryContent += ` I recorded: ${actionParts.join(', ')}. I'll use this to make better recommendations for you.`;
+      }
+    }
+    
+    // Add summary message
+    const summaryMessage: Message = {
+      id: `widget-closed-${Date.now()}`,
+      role: 'system',
+      content: summaryContent,
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, summaryMessage]);
+
+    // Prepare detailed context message for auto-sending
+    if (feedbackCount > 0 || approvedEvents.size > 0 || rejectedEvents.size > 0) {
+      const approvedList: string[] = [];
+      const rejectedList: string[] = [];
+      const ratedList: string[] = [];
+      
+      // Organize feedback by type with enhanced context
+      allFeedbacks.forEach(f => {
+        const eventName = f.eventTitle || `Event ${f.eventId}`;
+        const eventTypeEmoji = f.eventType ? getEventTypeEmoji(f.eventType) : '';
+        const eventDetails = `${eventTypeEmoji} ${eventName}`;
+        
+        // Create enhanced feedback with suggestion context
+        const buildFeedbackText = (baseText: string, includeContext: boolean = true) => {
+          let result = baseText;
+          
+          if (includeContext && f.suggestionReason) {
+            result += ` (AI suggested because: ${f.suggestionReason})`;
+          }
+          
+          if (includeContext && f.suggestionConfidence) {
+            result += ` [Confidence: ${f.suggestionConfidence}/10]`;
+          }
+          
+          return result;
+        };
+        
+        if (approvedEvents.has(f.eventId)) {
+          const approvedText = f.comment 
+            ? buildFeedbackText(`${eventDetails} - "${f.comment}"`)
+            : buildFeedbackText(eventDetails);
+          approvedList.push(approvedText);
+        } else if (rejectedEvents.has(f.eventId)) {
+          const rejectedText = f.comment 
+            ? buildFeedbackText(`${eventDetails} - "${f.comment}"`)
+            : buildFeedbackText(eventDetails);
+          rejectedList.push(rejectedText);
+        } else if (f.rating || f.comment) {
+          const ratingText = f.rating === 'like' ? '👍' : f.rating === 'dislike' ? '👎' : '';
+          const ratedText = f.comment 
+            ? buildFeedbackText(`${eventDetails} ${ratingText} - "${f.comment}"`) 
+            : buildFeedbackText(`${eventDetails} ${ratingText}`);
+          ratedList.push(ratedText);
+        }
+      });
+      
+      // Helper function for event type emojis
+      function getEventTypeEmoji(eventType: string) {
+        const emojis: Record<string, string> = {
+          "flight": "✈️",
+          "accommodation": "🏨",
+          "activity": "🎯",
+          "transport": "🚗",
+          "dining": "🍽️",
+          "wellness": "🧘"
+        };
+        return emojis[eventType] || "📅";
+      }
+      
+      // Build formatted context message
+      const contextParts: string[] = [];
+      
+      if (approvedList.length > 0) {
+        contextParts.push(`\n✅ Approved (${approvedList.length}):\n${approvedList.map(item => `  • ${item}`).join('\n')}`);
+      }
+      
+      if (rejectedList.length > 0) {
+        contextParts.push(`\n❌ Rejected (${rejectedList.length}):\n${rejectedList.map(item => `  • ${item}`).join('\n')}`);
+      }
+      
+      if (ratedList.length > 0) {
+        contextParts.push(`\n📝 Additional Feedback:\n${ratedList.map(item => `  • ${item}`).join('\n')}`);
+      }
+      
+      if (contextParts.length > 0) {
+        const contextMessage = `Based on my feedback:${contextParts.join('')}\n\nPlease use this feedback for future suggestions.`;
+        
+        // Auto-send the context message after a short delay using ref
+        setTimeout(() => {
+          if (sendMessageRef.current) {
+            sendMessageRef.current(contextMessage);
+          }
+        }, 1500);
+      }
+    }
+  }, [approvedEvents, rejectedEvents])
 
   useEffect(() => {
     const testConnection = async () => {
@@ -98,6 +304,7 @@ export default function ChatPage() {
     }
     
     testConnection()
+    // Don't fetch suggested events on initial load - only after agent interactions
     const interval = setInterval(testConnection, 30000)
     return () => clearInterval(interval)
   }, [])
@@ -131,23 +338,22 @@ export default function ChatPage() {
       const sessionResponse = await fetch('/api/auth/session')
       const sessionData = await sessionResponse.json()
       
-      // Use environment variable for agent URL or fallback to default
-      const agentURL = process.env.NEXT_PUBLIC_AGENT_URL || 'http://localhost:8001';
-      const response = await fetch(`${agentURL}/api/agent/chat/stream`, {
+      // Call KohTravel API chat endpoint (which will add context and forward to agent)
+      const apiURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiURL}/api/agent/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sessionData?.accessToken || 'dev_token'}`,
         },
+        credentials: 'include', // Include NextAuth session cookies
         body: JSON.stringify({
           session_id: sessionId.current,
           message: text,
-          user_id: session.user.email,
-          project: 'kohtravel',
           context: {
             session_data: sessionData,
             user_name: session.user.name,
-            user_image: session.user.image
+            user_image: session.user.image,
+            calendar_feedbacks: calendarFeedbacks
           }
         })
       })
@@ -182,12 +388,20 @@ export default function ChatPage() {
                   ))
                 } else if (data.type === 'tool_call') {
                   const toolMessage: Message = {
-                    id: `tool-${Date.now()}`,
+                    id: `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                     role: 'system',
                     content: `🔧 Using ${data.data.name} tool...`,
                     timestamp: new Date()
                   }
                   setMessages(prev => [...prev.slice(0, -1), toolMessage, { ...prev[prev.length - 1], content: assistantContent }])
+                  
+                  // Check if agent is creating suggestions or showing calendar widget
+                  if (data.data.name === 'show_suggested_events_carousel' || data.data.name === 'suggest_calendar_event') {
+                    // Show calendar widget when agent creates suggestions
+                    setTimeout(() => {
+                      showCalendarWidgetHandler()
+                    }, 1000)
+                  }
                 } else if (data.type === 'error') {
                   assistantContent += `\n\n❌ Error: ${data.data.error}`
                   setMessages(prev => prev.map(msg => 
@@ -223,8 +437,14 @@ export default function ChatPage() {
       ))
     } finally {
       setIsLoading(false)
+      // Calendar widget is now controlled by agent via tool calls
     }
-  }, [input, isLoading, session])
+  }, [input, isLoading, session, calendarFeedbacks])
+
+  // Assign sendMessage to ref for use in callbacks
+  useEffect(() => {
+    sendMessageRef.current = sendMessage
+  }, [sendMessage])
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -311,8 +531,31 @@ export default function ChatPage() {
               </div>
             </div>
             
-            {messages.length > 0 && (
-              <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={toggleCalendarWidget}
+                className={`border-slate-200 font-medium ${
+                  showCalendarWidget 
+                    ? 'bg-blue-50 text-blue-600 border-blue-200 shadow-sm' 
+                    : 'hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600 hover:shadow-sm'
+                }`}
+              >
+                {showCalendarWidget ? (
+                  <>
+                    <X className="h-4 w-4" />
+                    <span className="ml-2">Hide Events</span>
+                  </>
+                ) : (
+                  <>
+                    <CalendarDays className="h-4 w-4" />
+                    <span className="ml-2">Show Events</span>
+                  </>
+                )}
+              </Button>
+              
+              {messages.length > 0 && (
                 <Button 
                   variant="outline" 
                   size="sm" 
@@ -331,6 +574,9 @@ export default function ChatPage() {
                     </>
                   )}
                 </Button>
+              )}
+              
+              {messages.length > 0 && (
                 <Button 
                   variant="outline" 
                   size="sm" 
@@ -340,8 +586,8 @@ export default function ChatPage() {
                   <Trash2 className="h-4 w-4" />
                   <span className="ml-2">Clear</span>
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -399,69 +645,119 @@ export default function ChatPage() {
           </div>
         ) : (
           <div className="px-4 py-6 space-y-6 max-w-3xl mx-auto">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex items-start gap-3 ${
-                  message.role === 'user' ? 'flex-row-reverse' : ''
-                }`}
-              >
-                {/* Avatar */}
-                <div className="flex-shrink-0">
-                  {message.role === 'user' ? (
-                    <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center">
-                      <User className="h-4 w-4 text-white" />
+            {messages.map((message, index) => {
+              // Check if this is the last assistant message and not streaming
+              const isLastAssistantMessage = message.role === 'assistant' && 
+                !message.streaming && 
+                index === messages.length - 1;
+
+              return (
+                <div key={message.id}>
+                  <div className={`flex items-start gap-3 ${
+                    message.role === 'user' ? 'flex-row-reverse' : ''
+                  }`}>
+                    {/* Avatar */}
+                    <div className="flex-shrink-0">
+                      {message.role === 'user' ? (
+                        <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center">
+                          <User className="h-4 w-4 text-white" />
+                        </div>
+                      ) : message.role === 'assistant' ? (
+                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
+                          <Bot className="h-4 w-4 text-slate-600" />
+                        </div>
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">
+                          <FileText className="h-4 w-4 text-slate-600" />
+                        </div>
+                      )}
                     </div>
-                  ) : message.role === 'assistant' ? (
-                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
-                      <Bot className="h-4 w-4 text-slate-600" />
+
+                    {/* Message Content */}
+                    <div className={`flex-1 ${message.role === 'user' ? 'text-right' : ''}`}>
+                      <div
+                        className={`inline-block rounded-2xl px-4 py-3 max-w-[85%] ${
+                          message.role === 'user'
+                            ? 'bg-slate-900 text-white'
+                            : message.role === 'system'
+                            ? 'bg-amber-50 text-amber-800 border border-amber-200 text-sm'
+                            : 'bg-white border border-slate-200'
+                        }`}
+                      >
+                        <p className="whitespace-pre-wrap leading-relaxed">
+                          {message.content}
+                        </p>
+                        
+                        {message.streaming && (
+                          <div className="flex items-center gap-2 mt-3 pt-2 border-t border-slate-200">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span className="text-sm opacity-70">Typing...</span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Timestamp */}
+                      <div className={`text-xs text-slate-400 mt-1 ${
+                        message.role === 'user' ? 'text-right' : 'text-left'
+                      }`}>
+                        {message.timestamp.toLocaleTimeString([], { 
+                          hour: '2-digit', 
+                          minute: '2-digit' 
+                        })}
+                      </div>
                     </div>
-                  ) : (
-                    <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">
-                      <FileText className="h-4 w-4 text-slate-600" />
+                  </div>
+
+                  {/* Show Interactive Calendar Widget after agent suggests events */}
+                  {isLastAssistantMessage && showCalendarWidget && (
+                    <div className="mt-6 mb-4">
+                      <InteractiveCalendarWidget
+                        key={widgetKey}
+                        compact={true}
+                        showOnlySuggested={true}
+                        enableInteractions={true}
+                        showCloseButton={true}
+                        maxHeight="500px"
+                        onEventApproved={handleEventApproved}
+                        onEventRejected={handleEventRejected}
+                        onEventFeedback={handleEventFeedback}
+                        onWidgetClosed={handleCalendarWidgetClosed}
+                        approvedEventIds={approvedEvents}
+                        rejectedEventIds={rejectedEvents}
+                        className="border-2 border-blue-200 rounded-lg bg-gradient-to-br from-blue-50 to-indigo-50"
+                      />
                     </div>
                   )}
                 </div>
-
-                {/* Message Content */}
-                <div className={`flex-1 ${message.role === 'user' ? 'text-right' : ''}`}>
-                  <div
-                    className={`inline-block rounded-2xl px-4 py-3 max-w-[85%] ${
-                      message.role === 'user'
-                        ? 'bg-slate-900 text-white'
-                        : message.role === 'system'
-                        ? 'bg-amber-50 text-amber-800 border border-amber-200 text-sm'
-                        : 'bg-white border border-slate-200'
-                    }`}
-                  >
-                    <p className="whitespace-pre-wrap leading-relaxed">
-                      {message.content}
-                    </p>
-                    
-                    {message.streaming && (
-                      <div className="flex items-center gap-2 mt-3 pt-2 border-t border-slate-200">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span className="text-sm opacity-70">Typing...</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Timestamp */}
-                  <div className={`text-xs text-slate-400 mt-1 ${
-                    message.role === 'user' ? 'text-right' : 'text-left'
-                  }`}>
-                    {message.timestamp.toLocaleTimeString([], { 
-                      hour: '2-digit', 
-                      minute: '2-digit' 
-                    })}
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
         )}
       </div>
+
+      {/* Manual Calendar Widget - Can be shown anytime */}
+      {showCalendarWidget && !messages.some(msg => msg.role === 'assistant' && !msg.streaming && messages.indexOf(msg) === messages.length - 1) && (
+        <div className="flex-shrink-0 px-4 pb-4 max-w-3xl mx-auto overflow-hidden">
+          <div className="max-h-[70vh] overflow-y-auto">
+            <InteractiveCalendarWidget
+              key={widgetKey}
+              compact={false}
+              showOnlySuggested={false}
+              enableInteractions={true}
+              showCloseButton={false}
+              maxHeight="none"
+              onEventApproved={handleEventApproved}
+              onEventRejected={handleEventRejected}
+              onEventFeedback={handleEventFeedback}
+              onWidgetClosed={handleCalendarWidgetClosed}
+              approvedEventIds={approvedEvents}
+              rejectedEventIds={rejectedEvents}
+              className="border-2 border-blue-200 rounded-lg bg-gradient-to-br from-blue-50 to-indigo-50"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Input Area - Fixed */}
       <footer className="flex-shrink-0 border-t bg-white p-4">
