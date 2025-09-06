@@ -21,6 +21,10 @@ const convertEvent = (apiEvent: CalendarEvent) => {
     type: apiEvent.event_type,
     color: apiEvent.color || getDefaultColor(apiEvent.event_type),
     description: apiEvent.description || apiEvent.location || '',
+    status: apiEvent.status,
+    isSuggested: apiEvent.status === 'suggested',
+    suggestionReason: apiEvent.suggestion_reason,
+    suggestionConfidence: apiEvent.suggestion_confidence,
   };
 };
 
@@ -48,6 +52,7 @@ export function Calendar() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAddEventDialogOpen, setIsAddEventDialogOpen] = useState(false);
+  const [showSuggestedEvents, setShowSuggestedEvents] = useState(true);
 
   // Fetch events from API
   const fetchEvents = async () => {
@@ -103,9 +108,23 @@ export function Calendar() {
     fetchEventTypes();
   }, []);
 
+  // Listen for calendar refresh events from chat component
+  useEffect(() => {
+    const handleCalendarRefresh = () => {
+      fetchEvents();
+    };
+    
+    window.addEventListener('calendar-refresh', handleCalendarRefresh);
+    return () => window.removeEventListener('calendar-refresh', handleCalendarRefresh);
+  }, [fetchEvents]);
+
   // Get events for a specific date
   const getEventsForDate = (date: Date): Event[] => {
-    return events.filter(event => isSameDay(event.date, date));
+    return events.filter(event => {
+      const matchesDate = isSameDay(event.date, date);
+      const shouldShow = showSuggestedEvents || !event.isSuggested;
+      return matchesDate && shouldShow;
+    });
   };
 
   // Navigate dates based on view mode
@@ -192,11 +211,15 @@ export function Calendar() {
                 <div
                   key={event.id}
                   className={cn(
-                    "text-xs p-1 rounded text-white truncate",
-                    event.color
+                    "text-xs p-1 rounded text-white truncate relative",
+                    event.color,
+                    event.isSuggested && "opacity-70 border-2 border-dashed border-white/50"
                   )}
-                  title={`${event.time} - ${event.title}`}
+                  title={`${event.time} - ${event.title}${event.isSuggested ? ' (Suggested)' : ''}`}
                 >
+                  {event.isSuggested && (
+                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full border border-white" />
+                  )}
                   {event.time} {event.title}
                 </div>
               ))}
@@ -270,11 +293,15 @@ export function Calendar() {
                     <div
                       key={event.id}
                       className={cn(
-                        "text-xs p-2 rounded text-white",
-                        event.color
+                        "text-xs p-2 rounded text-white relative",
+                        event.color,
+                        event.isSuggested && "opacity-70 border-2 border-dashed border-white/50"
                       )}
-                      title={event.description}
+                      title={`${event.description}${event.isSuggested ? ' (Suggested)' : ''}`}
                     >
+                      {event.isSuggested && (
+                        <div className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full border border-white" />
+                      )}
                       <div className="font-medium">{event.time}</div>
                       <div className="truncate">{event.title}</div>
                     </div>
@@ -336,12 +363,19 @@ export function Calendar() {
                       <div
                         key={event.id}
                         className={cn(
-                          "p-2 rounded text-white",
-                          event.color
+                          "p-2 rounded text-white relative",
+                          event.color,
+                          event.isSuggested && "opacity-70 border-2 border-dashed border-white/50"
                         )}
                       >
+                        {event.isSuggested && (
+                          <div className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full border border-white" />
+                        )}
                         <div className="font-medium">{event.title}</div>
                         <div className="text-xs opacity-90">{event.description}</div>
+                        {event.isSuggested && (
+                          <div className="text-xs opacity-75 mt-1">Suggested</div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -428,6 +462,14 @@ export function Calendar() {
               </Button>
             </div>
             
+            <Button 
+              variant={showSuggestedEvents ? 'default' : 'outline'} 
+              size="sm" 
+              onClick={() => setShowSuggestedEvents(!showSuggestedEvents)}
+            >
+              ✨ Suggestions
+            </Button>
+            
             <Button size="sm" onClick={() => setIsAddEventDialogOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
               Add Event
@@ -463,17 +505,39 @@ export function Calendar() {
           ) : (
             <div className="space-y-3">
               {getEventsForDate(selectedDate).map((event) => (
-                <div key={event.id} className="flex items-start space-x-3 p-3 border rounded-lg">
+                <div key={event.id} className={cn(
+                  "flex items-start space-x-3 p-3 border rounded-lg",
+                  event.isSuggested && "border-dashed border-amber-300 bg-amber-50"
+                )}>
                   <div className={cn("w-3 h-3 rounded-full mt-1", event.color)} />
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
-                      <h4 className="font-medium">{event.title}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium">{event.title}</h4>
+                        {event.isSuggested && (
+                          <Badge variant="secondary" className="text-xs bg-amber-200 text-amber-800">
+                            ✨ Suggested
+                          </Badge>
+                        )}
+                      </div>
                       <span className="text-sm text-gray-500">{event.time}</span>
                     </div>
                     <p className="text-sm text-gray-600 mt-1">{event.description}</p>
-                    <Badge variant="outline" className="mt-2 text-xs">
-                      {event.type}
-                    </Badge>
+                    {event.suggestionReason && (
+                      <p className="text-xs text-amber-700 mt-1 italic">
+                        Reason: {event.suggestionReason}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2 mt-2">
+                      <Badge variant="outline" className="text-xs">
+                        {event.type}
+                      </Badge>
+                      {event.suggestionConfidence && (
+                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700">
+                          {event.suggestionConfidence}/10 confidence
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -486,7 +550,7 @@ export function Calendar() {
       <Card className="p-4">
         <h3 className="text-sm font-medium mb-3">Event Types</h3>
         <div className="flex flex-wrap gap-3">
-          {eventTypes.map(({ type, color, label }) => (
+          {eventTypes?.map(({ type, color, label }) => (
             <div key={type} className="flex items-center space-x-2">
               <div className={cn("w-3 h-3 rounded-full", color)} />
               <span className="text-sm">{label}</span>

@@ -30,8 +30,15 @@ class CalendarEvent(Base):
     external_id = Column(String(255), nullable=True, index=True)  # For future integrations
     
     # Status and metadata
-    status = Column(String(20), default='confirmed')  # confirmed, tentative, cancelled
+    status = Column(String(20), default='confirmed')  # confirmed, tentative, cancelled, suggested
     notes = Column(Text, nullable=True)
+    
+    # Suggested events metadata
+    suggestion_reason = Column(Text, nullable=True)  # AI reasoning for the suggestion
+    suggestion_confidence = Column(Integer, nullable=True)  # 1-10 confidence score
+    user_feedback = Column(Text, nullable=True)  # User's rejection reason
+    suggested_by = Column(String(100), nullable=True)  # 'agent', 'user', etc.
+    parent_event_id = Column(UUID(as_uuid=True), ForeignKey("calendar_events.id"), nullable=True, index=True)  # Links approved event to original suggestion
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -39,6 +46,9 @@ class CalendarEvent(Base):
     # Relationships
     user = relationship("User", back_populates="calendar_events")
     document = relationship("Document", backref="calendar_events")
+    
+    # Self-referential relationship for suggested events
+    parent_event = relationship("CalendarEvent", remote_side=[id], backref="suggested_events")
     
     def __repr__(self):
         return f"<CalendarEvent(id={self.id}, title={self.title}, type={self.event_type}, start={self.start_datetime})>"
@@ -59,6 +69,11 @@ class CalendarEvent(Base):
             "notes": self.notes,
             "source": self.source,
             "document_id": str(self.document_id) if self.document_id else None,
+            "suggestion_reason": self.suggestion_reason,
+            "suggestion_confidence": self.suggestion_confidence,
+            "user_feedback": self.user_feedback,
+            "suggested_by": self.suggested_by,
+            "parent_event_id": str(self.parent_event_id) if self.parent_event_id else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }

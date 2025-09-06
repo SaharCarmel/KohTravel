@@ -851,6 +851,204 @@ async def delete_user_calendar_event(request: ToolRequest, db: Session = Depends
         )
 
 
+@router.post("/suggest_calendar_event", response_model=ToolResponse)
+async def suggest_user_calendar_event(request: ToolRequest, db: Session = Depends(get_db)):
+    """
+    Suggest a new calendar event for the user's review and approval
+    This creates a suggested event that appears in the chat carousel and calendar with special styling
+    """
+    try:
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User authentication failed",
+                error="auth_failed"
+            )
+        
+        # Extract required parameters
+        title = request.parameters.get("title")
+        start_datetime = request.parameters.get("start_datetime")
+        event_type = request.parameters.get("event_type", "activity")
+        suggestion_reason = request.parameters.get("suggestion_reason")
+        suggestion_confidence = request.parameters.get("suggestion_confidence", 7)
+        
+        if not title:
+            return ToolResponse(
+                success=False,
+                content="Event title is required",
+                error="missing_title"
+            )
+        
+        if not start_datetime:
+            return ToolResponse(
+                success=False,
+                content="Event start_datetime is required",
+                error="missing_start_datetime"
+            )
+            
+        if not suggestion_reason:
+            return ToolResponse(
+                success=False,
+                content="Suggestion reason is required for suggested events",
+                error="missing_suggestion_reason"
+            )
+        
+        # Validate event type
+        valid_types = ["flight", "accommodation", "activity", "transport", "dining", "wellness"]
+        if event_type not in valid_types:
+            return ToolResponse(
+                success=False,
+                content=f"Invalid event_type '{event_type}'. Must be one of: {', '.join(valid_types)}",
+                error="invalid_event_type"
+            )
+        
+        # Validate confidence score
+        if not isinstance(suggestion_confidence, int) or not (1 <= suggestion_confidence <= 10):
+            return ToolResponse(
+                success=False,
+                content="Suggestion confidence must be an integer between 1 and 10",
+                error="invalid_confidence"
+            )
+        
+        # Parse datetime
+        try:
+            start_dt = datetime.fromisoformat(start_datetime.replace('Z', '+00:00'))
+        except ValueError:
+            return ToolResponse(
+                success=False,
+                content=f"Invalid start_datetime format: {start_datetime}. Use ISO format (YYYY-MM-DDTHH:MM:SS)",
+                error="invalid_datetime_format"
+            )
+        
+        # Parse end_datetime if provided
+        end_dt = None
+        end_datetime = request.parameters.get("end_datetime")
+        if end_datetime:
+            try:
+                end_dt = datetime.fromisoformat(end_datetime.replace('Z', '+00:00'))
+            except ValueError:
+                return ToolResponse(
+                    success=False,
+                    content=f"Invalid end_datetime format: {end_datetime}. Use ISO format (YYYY-MM-DDTHH:MM:SS)",
+                    error="invalid_datetime_format"
+                )
+        
+        # Set default color based on event type
+        color_map = {
+            "flight": "bg-blue-500",
+            "accommodation": "bg-green-500",
+            "activity": "bg-purple-500", 
+            "transport": "bg-cyan-500",
+            "dining": "bg-yellow-500",
+            "wellness": "bg-pink-500"
+        }
+        
+        # Create the suggested event
+        suggested_event = CalendarEvent(
+            user_id=user_uuid,
+            title=title,
+            description=request.parameters.get("description"),
+            location=request.parameters.get("location"),
+            start_datetime=start_dt,
+            end_datetime=end_dt,
+            all_day=request.parameters.get("all_day", False),
+            event_type=event_type,
+            color=request.parameters.get("color", color_map.get(event_type, "bg-gray-500")),
+            status="suggested",  # Always suggested for this endpoint
+            notes=request.parameters.get("notes"),
+            source="agent_suggested",
+            suggestion_reason=suggestion_reason,
+            suggestion_confidence=suggestion_confidence,
+            suggested_by="agent"
+        )
+        
+        db.add(suggested_event)
+        db.commit()
+        db.refresh(suggested_event)
+        
+        # Format response
+        event_data = suggested_event.to_dict()
+        content = f"I've suggested a calendar event '{title}' for {start_dt.strftime('%Y-%m-%d %H:%M')}"
+        if suggested_event.location:
+            content += f" at {suggested_event.location}"
+        content += f". You can review and approve this suggestion in the chat interface or calendar view."
+        content += f"\n\nReason: {suggestion_reason}"
+        content += f"\nConfidence: {suggestion_confidence}/10"
+        
+        logger.info("Calendar event suggested", 
+                   user_id=request.user_id,
+                   event_id=event_data["id"],
+                   title=title,
+                   event_type=event_type,
+                   confidence=suggestion_confidence)
+        
+        return ToolResponse(
+            success=True,
+            content=content,
+            metadata={"suggested_event": event_data}
+        )
+        
+    except Exception as e:
+        logger.error("Suggest calendar event failed", error=str(e), user_id=request.user_id)
+        return ToolResponse(
+            success=False,
+            content=f"Failed to suggest calendar event: {str(e)}",
+            error=str(e)
+        )
+
+
+@router.post("/show_suggested_events_carousel", response_model=ToolResponse)
+async def show_suggested_events_carousel(request: ToolRequest, db: Session = Depends(get_db)):
+    """
+    Signal the frontend to show the suggested events carousel
+    Use this after creating event suggestions to prompt user for approval
+    """
+    try:
+        # Get user with proper migration handling
+        from services.user_migration import UserMigrationService
+        user_uuid = await UserMigrationService.get_accessible_user_id(request.user_id, db)
+        if not user_uuid:
+            return ToolResponse(
+                success=False,
+                content="User authentication failed",
+                error="auth_failed"
+            )
+        
+        # Get current suggested events count
+        suggested_count = db.query(CalendarEvent).filter(
+            CalendarEvent.user_id == user_uuid,
+            CalendarEvent.status == "suggested"
+        ).count()
+        
+        content = f"Showing suggested events carousel with {suggested_count} suggestions for your review."
+        if suggested_count == 0:
+            content = "No suggested events to display. Create some suggestions first using suggest_calendar_event."
+        
+        logger.info("Showing suggested events carousel", 
+                   user_id=request.user_id,
+                   suggested_count=suggested_count)
+        
+        return ToolResponse(
+            success=True,
+            content=content,
+            metadata={
+                "action": "show_carousel",
+                "suggested_count": suggested_count
+            }
+        )
+        
+    except Exception as e:
+        logger.error("Show carousel failed", error=str(e), user_id=request.user_id)
+        return ToolResponse(
+            success=False,
+            content=f"Failed to show carousel: {str(e)}",
+            error=str(e)
+        )
+
+
 @router.get("/available_tools", response_model=List[Dict[str, Any]])
 async def get_available_tools():
     """
@@ -1046,6 +1244,65 @@ async def get_available_tools():
                     }
                 },
                 "required": ["event_id"]
+            }
+        },
+        {
+            "name": "suggest_calendar_event",
+            "description": "Suggest a new calendar event that appears in the chat carousel for user approval. Use this when you want to propose events based on user documents or conversation context.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Event title"
+                    },
+                    "start_datetime": {
+                        "type": "string",
+                        "description": "Event start date and time (ISO format: YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "end_datetime": {
+                        "type": "string",
+                        "description": "Event end date and time (optional, ISO format: YYYY-MM-DDTHH:MM:SS)"
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "description": "Event type: flight, accommodation, activity, transport, dining, wellness (default: activity)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Event description (optional)"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Event location (optional)"
+                    },
+                    "all_day": {
+                        "type": "boolean",
+                        "description": "Whether this is an all-day event (default: false)"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Additional notes (optional)"
+                    },
+                    "suggestion_reason": {
+                        "type": "string",
+                        "description": "Required: Explain why you're suggesting this event to help the user understand the recommendation"
+                    },
+                    "suggestion_confidence": {
+                        "type": "integer",
+                        "description": "Confidence level from 1-10 for this suggestion (default: 7)"
+                    }
+                },
+                "required": ["title", "start_datetime", "suggestion_reason"]
+            }
+        },
+        {
+            "name": "show_suggested_events_carousel",
+            "description": "Display the suggested events carousel in the chat interface. Use this after creating event suggestions to prompt the user for approval/rejection.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
             }
         }
     ]

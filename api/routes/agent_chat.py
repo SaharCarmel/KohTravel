@@ -1,106 +1,100 @@
 """
-Agent chat endpoint that properly initializes agents with KohTravel prompts
+Agent chat endpoint that includes KohTravel-specific context
 """
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
-import structlog
 import httpx
-from datetime import datetime
-import json
+import os
+from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
+import structlog
 
 from database import get_db
-from services.agent_service import kohtravel_agent_service
+from services.auth import get_current_user
+from services.context_service import TravelContextService
+from models.user import User
 
 logger = structlog.get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(
+    tags=["chat"]
+)
 
 
 class ChatRequest(BaseModel):
     session_id: str
     message: str
-    user_id: str
     context: Optional[Dict[str, Any]] = None
 
 
-class ChatResponse(BaseModel):
-    session_id: str
-    status: str
-    message: str
-
-
-@router.post("/chat", response_model=ChatResponse)
-async def chat_with_agent(request: ChatRequest, db: Session = Depends(get_db)):
-    """Chat with KohTravel agent (non-streaming)"""
-    try:
-        # Ensure agent is initialized for this user
-        await kohtravel_agent_service.initialize_agent(request.user_id)
-        
-        # Send message through agent service
-        result = await kohtravel_agent_service.send_message(
-            session_id=request.session_id,
-            message=request.message,
-            user_id=request.user_id,
-            context=request.context
-        )
-        
-        return ChatResponse(
-            session_id=result["session_id"],
-            status=result["status"],
-            message=result["message"]
-        )
-        
-    except Exception as e:
-        logger.error("Chat error", error=str(e), session_id=request.session_id)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.post("/chat/stream")
-async def stream_chat_with_agent(request: ChatRequest, db: Session = Depends(get_db)):
-    """Stream chat with KohTravel agent"""
-    
-    async def generate_stream():
-        try:
-            # Ensure agent is initialized for this user
-            logger.info("Initializing KohTravel agent", user_id=request.user_id)
-            init_success = await kohtravel_agent_service.initialize_agent(request.user_id)
-            logger.info("Agent initialization result", user_id=request.user_id, success=init_success)
-            
-            # Stream the conversation through agent infrastructure
-            async with httpx.AsyncClient(timeout=60) as client:
-                async with client.stream(
-                    'POST',
-                    f"{kohtravel_agent_service.agent_infrastructure_url}/api/agent/chat/stream",
-                    json={
-                        "session_id": request.session_id,
-                        "message": request.message,
-                        "project": "kohtravel",
-                        "user_id": request.user_id,
-                        "context": request.context
-                    }
-                ) as response:
-                    if response.status_code != 200:
-                        yield f'data: {{"type": "error", "data": {{"error": "Chat stream failed"}}}}\n\n'
-                        return
-                        
-                    async for chunk in response.aiter_text():
-                        if chunk.strip():
-                            yield chunk
-                            
-        except Exception as e:
-            logger.error("Stream chat error", error=str(e), session_id=request.session_id)
-            yield f'data: {{"type": "error", "data": {{"error": "{str(e)}"}}}}\n\n'
-    
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "*"
+async def chat_with_context(
+    request: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Chat with agent including KohTravel-specific context
+    Routes to agent infrastructure with enhanced context
+    """
+    try:
+        # Generate travel-specific context
+        travel_context = await TravelContextService.get_agent_context(
+            current_user.email, db
+        )
+        
+        # Merge with any existing context from frontend
+        enhanced_context = {
+            **(request.context or {}),
+            **travel_context,
+            "user_name": current_user.name,
+            "user_email": current_user.email
         }
-    )
+        
+        # Prepare request for agent infrastructure
+        agent_request = {
+            "session_id": request.session_id,
+            "message": request.message,
+            "user_id": current_user.email,
+            "project": "kohtravel",
+            "context": enhanced_context
+        }
+        
+        # Get agent infrastructure URL
+        agent_url = os.getenv("AGENT_INFRASTRUCTURE_URL", "http://localhost:8001")
+        
+        # Forward to agent infrastructure with enhanced context
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{agent_url}/api/agent/chat/stream",
+                json=agent_request,
+                timeout=120.0
+            )
+            
+            if not response.is_success:
+                logger.error("Agent infrastructure error", 
+                           status_code=response.status_code,
+                           response_text=response.text)
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Agent infrastructure error: {response.text}"
+                )
+            
+            # Stream the response back to frontend
+            async def generate():
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+                    
+            return StreamingResponse(
+                generate(),
+                media_type=response.headers.get("content-type", "text/plain"),
+                headers={"Cache-Control": "no-cache"}
+            )
+            
+    except httpx.TimeoutException:
+        logger.error("Agent infrastructure timeout", user_id=current_user.email)
+        raise HTTPException(status_code=504, detail="Agent service timeout")
+    except Exception as e:
+        logger.error("Chat with context failed", error=str(e), user_id=current_user.email)
+        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
