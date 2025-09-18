@@ -37,32 +37,13 @@ class AgentRepository(BaseRepository[AgentModel, Dict[str, Any], Dict[str, Any]]
         return AgentModel
 
     async def get_by_app_and_name(self, app_name: str, name: str) -> Optional[AgentModel]:
-        """
-        Get agent by application name and agent name
-
-        Args:
-            app_name: Application identifier
-            name: Agent name
-
-        Returns:
-            Agent model or None if not found
-        """
-        try:
-            result = await self.session.execute(
-                select(AgentModel)
-                .where(AgentModel.app_name == app_name)
-                .where(AgentModel.name == name)
-            )
-            return result.scalar_one_or_none()
-
-        except Exception as e:
-            logger.error(
-                "Failed to get agent by app and name",
-                app_name=app_name,
-                name=name,
-                error=str(e)
-            )
-            raise
+        """Get agent by application name and agent name"""
+        result = await self.session.execute(
+            select(AgentModel)
+            .where(AgentModel.app_name == app_name)
+            .where(AgentModel.name == name)
+        )
+        return result.scalar_one_or_none()
 
     async def get_by_app(
         self,
@@ -71,37 +52,15 @@ class AgentRepository(BaseRepository[AgentModel, Dict[str, Any], Dict[str, Any]]
         offset: int = 0,
         limit: int = 100
     ) -> List[AgentModel]:
-        """
-        Get agents by application name
+        """Get agents by application name"""
+        query = select(AgentModel).where(AgentModel.app_name == app_name)
 
-        Args:
-            app_name: Application identifier
-            active_only: Whether to return only active agents
-            offset: Number of records to skip
-            limit: Maximum number of records to return
+        if active_only:
+            query = query.where(AgentModel.is_active == True)
 
-        Returns:
-            List of agents for the application
-        """
-        try:
-            query = select(AgentModel).where(AgentModel.app_name == app_name)
-
-            if active_only:
-                query = query.where(AgentModel.is_active == True)
-
-            query = query.offset(offset).limit(limit).order_by(AgentModel.name)
-
-            result = await self.session.execute(query)
-            return list(result.scalars().all())
-
-        except Exception as e:
-            logger.error(
-                "Failed to get agents by app",
-                app_name=app_name,
-                active_only=active_only,
-                error=str(e)
-            )
-            raise
+        query = query.offset(offset).limit(limit).order_by(AgentModel.name)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
 
     async def get_active_agents(
         self,
@@ -243,33 +202,16 @@ class AgentRepository(BaseRepository[AgentModel, Dict[str, Any], Dict[str, Any]]
         return await self.update(agent_id, {"is_active": is_active})
 
     async def get_with_relationships(self, agent_id: str) -> Optional[AgentModel]:
-        """
-        Get agent with all relationships loaded
-
-        Args:
-            agent_id: Agent identifier
-
-        Returns:
-            Agent with relationships or None if not found
-        """
-        try:
-            result = await self.session.execute(
-                select(AgentModel)
-                .options(
-                    selectinload(AgentModel.user_contexts),
-                    selectinload(AgentModel.sessions)
-                )
-                .where(AgentModel.id == agent_id)
+        """Get agent with all relationships loaded"""
+        result = await self.session.execute(
+            select(AgentModel)
+            .options(
+                selectinload(AgentModel.user_contexts),
+                selectinload(AgentModel.sessions)
             )
-            return result.scalar_one_or_none()
-
-        except Exception as e:
-            logger.error(
-                "Failed to get agent with relationships",
-                agent_id=agent_id,
-                error=str(e)
-            )
-            raise
+            .where(AgentModel.id == agent_id)
+        )
+        return result.scalar_one_or_none()
 
     def _add_relationship_loading(self, query):
         """Add relationship loading for agents"""

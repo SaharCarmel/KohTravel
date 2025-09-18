@@ -28,18 +28,18 @@ class HealthResponse(BaseModel):
 
 @router.get("/", response_model=HealthResponse)
 async def health_check():
-    """Basic health check endpoint with database status"""
+    """Basic health check endpoint"""
     settings = get_settings()
 
-    # Check database status
+    # Check database status if enabled
     database_status = None
     overall_status = "healthy"
 
-    if settings.agent_os_database_url:
+    if settings.agent_os_enabled:
         try:
             db_connected = await db_manager.health_check()
             database_status = DatabaseStatus(
-                enabled=settings.agent_os_enabled,
+                enabled=True,
                 connected=db_connected,
                 features={
                     "session_persistence": settings.enable_session_persistence,
@@ -47,19 +47,11 @@ async def health_check():
                     "user_context_persistence": settings.enable_user_context_persistence
                 }
             )
-
-            # If database is enabled but not connected, mark as degraded
-            if settings.agent_os_enabled and not db_connected:
+            if not db_connected:
                 overall_status = "degraded"
-
         except Exception:
-            database_status = DatabaseStatus(
-                enabled=settings.agent_os_enabled,
-                connected=False,
-                features={}
-            )
-            if settings.agent_os_enabled:
-                overall_status = "degraded"
+            database_status = DatabaseStatus(enabled=True, connected=False, features={})
+            overall_status = "degraded"
 
     return HealthResponse(
         status=overall_status,
@@ -97,36 +89,18 @@ async def liveness_check():
 
 @router.get("/database")
 async def database_status():
-    """Detailed database status endpoint"""
+    """Database status endpoint"""
     settings = get_settings()
 
     if not settings.agent_os_database_url:
-        return {
-            "enabled": False,
-            "message": "Agent OS database not configured"
-        }
+        return {"enabled": False, "connected": False}
 
     try:
         connected = await db_manager.health_check()
         return {
             "enabled": settings.agent_os_enabled,
             "connected": connected,
-            "initialized": db_manager.is_initialized,
-            "features": {
-                "session_persistence": settings.enable_session_persistence,
-                "agent_persistence": settings.enable_agent_persistence,
-                "user_context_persistence": settings.enable_user_context_persistence
-            },
-            "configuration": {
-                "pool_size": settings.agent_os_pool_size,
-                "max_overflow": settings.agent_os_max_overflow,
-                "pool_timeout": settings.agent_os_pool_timeout,
-                "pool_recycle": settings.agent_os_pool_recycle
-            }
+            "initialized": db_manager.is_initialized
         }
-    except Exception as e:
-        return {
-            "enabled": settings.agent_os_enabled,
-            "connected": False,
-            "error": str(e)
-        }
+    except Exception:
+        return {"enabled": settings.agent_os_enabled, "connected": False}

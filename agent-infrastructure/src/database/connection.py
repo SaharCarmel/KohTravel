@@ -74,35 +74,21 @@ class DatabaseManager:
             raise
 
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """
-        Get database session with proper cleanup
-
-        Yields:
-            AsyncSession: Database session with automatic cleanup
-
-        Raises:
-            RuntimeError: If database is not initialized
-        """
+        """Get database session with proper cleanup"""
         if not self._initialized or not self._session_maker:
             raise RuntimeError("Agent OS database not initialized")
 
         async with self._session_maker() as session:
             try:
                 yield session
-            except Exception as e:
+            except Exception:
                 await session.rollback()
-                logger.error("Database session error, rolling back", error=str(e))
                 raise
             finally:
                 await session.close()
 
     async def health_check(self) -> bool:
-        """
-        Check database connectivity and health
-
-        Returns:
-            bool: True if database is healthy, False otherwise
-        """
+        """Check database connectivity and health"""
         if not self._initialized or not self._engine:
             return False
 
@@ -110,8 +96,7 @@ class DatabaseManager:
             async with self._engine.begin() as conn:
                 await conn.execute("SELECT 1")
             return True
-        except Exception as e:
-            logger.error("Database health check failed", error=str(e))
+        except Exception:
             return False
 
     @property
