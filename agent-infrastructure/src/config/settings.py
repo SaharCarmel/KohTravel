@@ -32,6 +32,23 @@ class Settings(BaseSettings):
     
     # Database settings
     database_url: Optional[str] = None
+
+    # Agent OS Database Configuration
+    agent_os_database_url: Optional[str] = None
+    agent_os_database_enabled: bool = False
+    agent_os_pool_size: int = 5
+    agent_os_max_overflow: int = 10
+    agent_os_pool_timeout: int = 30
+    agent_os_pool_recycle: int = 3600
+
+    # Feature flags for Agent OS functionality
+    enable_session_persistence: bool = False
+    enable_agent_persistence: bool = False
+    enable_user_context_persistence: bool = False
+
+    # Database migration settings
+    agent_os_auto_migrate: bool = True
+    agent_os_migration_timeout: int = 60
     
     # Service URLs
     main_api_url: str = "http://localhost:8000"
@@ -79,6 +96,24 @@ class Settings(BaseSettings):
         if not v or not v.startswith("sk-"):
             raise ValueError("Invalid Anthropic API key")
         return v
+
+    @validator("agent_os_database_url")
+    def validate_agent_database_url(cls, v):
+        """Validate Agent OS database URL format"""
+        if v and not v.startswith(("postgresql://", "postgresql+asyncpg://")):
+            raise ValueError("Agent OS database URL must be PostgreSQL with asyncpg driver")
+        return v
+
+    @property
+    def agent_os_enabled(self) -> bool:
+        """Check if Agent OS database features are enabled"""
+        return (
+            self.agent_os_database_url is not None and
+            self.agent_os_database_enabled and
+            (self.enable_session_persistence or
+             self.enable_agent_persistence or
+             self.enable_user_context_persistence)
+        )
     
     def configure_logging(self):
         """Configure structured logging"""
