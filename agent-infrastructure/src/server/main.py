@@ -16,6 +16,7 @@ from src.server.middleware.auth import AuthMiddleware
 from src.server.middleware.logging import LoggingMiddleware
 from src.config.settings import get_settings
 from src.core.logging_config import configure_logging
+from src.database import db_manager, ensure_database_initialized
 
 logger = structlog.get_logger(__name__)
 
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan events"""
     # Startup
     settings = get_settings()
-    
+
     # Configure production logging
     configure_logging(
         log_level=settings.log_level,
@@ -36,16 +37,35 @@ async def lifespan(app: FastAPI):
         enable_json=True,
         enable_file_rotation=True
     )
-    
+
     logger.info("Starting agent infrastructure server", version="0.1.0")
-    
+
+    # Initialize Agent OS database if enabled
+    try:
+        await ensure_database_initialized()
+        if settings.agent_os_enabled:
+            logger.info("Agent OS database initialized successfully")
+        else:
+            logger.info("Agent OS database disabled, using in-memory storage")
+    except Exception as e:
+        logger.error("Failed to initialize Agent OS database", error=str(e))
+        if settings.agent_os_enabled:
+            logger.warning("Agent OS database initialization failed, falling back to in-memory storage")
+
     # Store settings in app state
     app_state["settings"] = settings
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down agent infrastructure server")
+
+    # Close database connections
+    try:
+        await db_manager.close()
+        logger.info("Agent OS database connections closed")
+    except Exception as e:
+        logger.error("Error closing database connections", error=str(e))
 
 
 def create_app() -> FastAPI:

@@ -32,6 +32,23 @@ class Settings(BaseSettings):
     
     # Database settings
     database_url: Optional[str] = None
+
+    # Agent OS Database Configuration
+    agent_os_database_url: Optional[str] = None
+    agent_os_database_enabled: bool = False
+    agent_os_pool_size: int = 5
+    agent_os_max_overflow: int = 10
+    agent_os_pool_timeout: int = 30
+    agent_os_pool_recycle: int = 3600
+
+    # Feature flags for Agent OS functionality
+    enable_session_persistence: bool = False
+    enable_agent_persistence: bool = False
+    enable_user_context_persistence: bool = False
+
+    # Database migration settings
+    agent_os_auto_migrate: bool = True
+    agent_os_migration_timeout: int = 60
     
     # Service URLs
     main_api_url: str = "http://localhost:8000"
@@ -50,23 +67,11 @@ class Settings(BaseSettings):
     
     def get_cors_origins_list(self) -> List[str]:
         """Parse CORS origins into list"""
-        if not self.cors_origins:
+        if not self.cors_origins or self.cors_origins.strip() == "*":
             return ["*"]
-        
-        v = self.cors_origins.strip()
-        if v == "*":
-            return ["*"]
-        
-        # Handle JSON array format
-        if v.startswith('[') and v.endswith(']'):
-            try:
-                import json
-                return json.loads(v)
-            except:
-                pass
-        
+
         # Handle comma-separated format
-        return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
     
     @validator("allowed_file_paths", pre=True)
     def parse_file_paths(cls, v):
@@ -79,6 +84,21 @@ class Settings(BaseSettings):
         if not v or not v.startswith("sk-"):
             raise ValueError("Invalid Anthropic API key")
         return v
+
+    @validator("agent_os_database_url")
+    def validate_agent_database_url(cls, v):
+        """Validate Agent OS database URL format"""
+        if v and not v.startswith(("postgresql://", "postgresql+asyncpg://")):
+            raise ValueError("Agent OS database URL must be PostgreSQL with asyncpg driver")
+        return v
+
+    @property
+    def agent_os_enabled(self) -> bool:
+        """Check if Agent OS database features are enabled"""
+        return (
+            self.agent_os_database_url is not None and
+            self.agent_os_database_enabled
+        )
     
     def configure_logging(self):
         """Configure structured logging"""
