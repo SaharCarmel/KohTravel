@@ -19,7 +19,7 @@ async def cleanup_inactive_agents(background_tasks: BackgroundTasks):
     
     def cleanup_task():
         try:
-            cutoff_time = datetime.utcnow() - timedelta(hours=1)  # 1 hour timeout
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=1)  # 1 hour timeout
             inactive_agents = []
             
             for agent_key, agent in list(user_agents.items()):

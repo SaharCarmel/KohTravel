@@ -7,7 +7,7 @@ import structlog
 import sys
 from pathlib import Path
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def configure_logging(
@@ -80,7 +80,7 @@ class AgentLogger:
             "conversation_started",
             session_id=session_id,
             message_length=user_message_length,
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat()
         )
     
     def tool_called(self, session_id: str, tool_name: str, parameters: Dict[str, Any], call_id: str):

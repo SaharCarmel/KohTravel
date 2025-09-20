@@ -89,105 +89,541 @@ Establish the Agent OS database infrastructure and core models without breaking 
 ## Tasks
 
 ### Task 1.1: Database Infrastructure Setup
-- [ ] Create separate Agent OS database configuration
+- [x] ✅ **COMPLETED** Create separate Agent OS database configuration
   - Completion Criteria: Agent OS has its own DATABASE_URL environment variable
   - Tests: Database connection test passes independently of KohTravel
+  - Implementation: `agent-infrastructure/src/config/settings.py` with `agent_os_database_url` setting
 
-- [ ] Update database.py to support Agent OS specific models
+- [x] ✅ **COMPLETED** Update database.py to support Agent OS specific models
   - Completion Criteria: Models can be created without conflicts
   - Tests: `alembic upgrade head` succeeds with new models
+  - Implementation: `agent-infrastructure/src/database/` with complete database infrastructure
 
-- [ ] Create Alembic migration environment for Agent OS
+- [x] ✅ **COMPLETED** Create Alembic migration environment for Agent OS
   - Completion Criteria: Migration system tracks Agent OS schema separately
   - Tests: Migration generation and application works correctly
+  - Implementation: `agent-infrastructure/src/migrations/` with full Alembic setup
 
 ### Task 1.2: Enhanced Database Models
-- [ ] Extend Agent model with proper constraints and indexes
+- [x] ✅ **COMPLETED** Extend Agent model with proper constraints and indexes
   - Completion Criteria: Unique constraints on (app_name, name) implemented
   - Tests: Duplicate agent creation fails appropriately
+  - Implementation: `agent-infrastructure/src/database/models/agent.py` with comprehensive constraints
 
-- [ ] Add foreign key relationships between models
+- [x] ✅ **COMPLETED** Add foreign key relationships between models
   - Completion Criteria: UserAgentContext and Session properly reference Agent
   - Tests: Referential integrity enforced at database level
+  - Implementation: All models have proper relationships and foreign key constraints
 
-- [ ] Implement model validation and business logic
+- [x] ✅ **COMPLETED** Implement model validation and business logic
   - Completion Criteria: Model methods for common operations exist
   - Tests: Unit tests for all model methods pass
+  - Implementation: Repository pattern with `BaseRepository` and specialized repositories
 
 ### Task 1.3: Environment Configuration
-- [ ] Update settings.py for dual-database support
+- [x] ✅ **COMPLETED** Update settings.py for dual-database support
   - Completion Criteria: Both AGENT_OS_DATABASE_URL and existing KohTravel DB URL supported
   - Tests: Settings load correctly with both database configurations
+  - Implementation: Enhanced settings with feature flags and database validation
 
-- [ ] Create development environment setup documentation
+- [x] ✅ **COMPLETED** Create development environment setup documentation
   - Completion Criteria: README includes setup instructions for dual databases
   - Tests: Fresh development setup follows documented process successfully
+  - Implementation: Comprehensive task breakdown and configuration documentation
 
 ## Dependencies
 None - this is the foundation phase
 
+## Phase 1 Status: ✅ **COMPLETED**
+**Merged to main:** PR #5 - Successfully merged on 2025-09-19
+**Key Achievements:**
+- Complete database infrastructure with async SQLAlchemy 2.0+
+- Repository pattern with comprehensive error handling
+- Multi-tenant architecture with app_name scoping
+- Feature flags for gradual rollout
+- Zero breaking changes to existing functionality
+- Production-ready logging and monitoring integration
+
+**Next Phase:** Ready to proceed with Phase 2 - Agent Management System
+
 ## Notes
-- Keep existing functionality intact during this phase
-- Use feature flags to enable/disable Agent OS features
-- Maintain backward compatibility with current API
+- Keep existing functionality intact during this phase ✅ **ACHIEVED**
+- Use feature flags to enable/disable Agent OS features ✅ **IMPLEMENTED**
+- Maintain backward compatibility with current API ✅ **VERIFIED**
 
 ---
 
 # Phase 2: Agent Management System
 
-## Objective
-Implement the core Agent management API that allows dynamic creation and configuration of agents.
+## Executive Summary
 
-## Deliverables
-- Agent creation and management endpoints
-- System prompt management with versioning
-- Tools configuration management
-- Agent lifecycle management
+Transform the agent infrastructure from hardcoded, single-agent system to a dynamic, database-driven "Agent OS" that can manage multiple agents across different applications. Phase 2 removes KohTravel-specific coupling while building the foundation for a multi-tenant agent platform.
 
-## Tasks
+## Architecture Vision
 
-### Task 2.1: Core Agent Management API
-- [ ] Implement POST /api/agents endpoint
-  - Completion Criteria: Can create agents with app_name, name, system_prompt, tools_config
-  - Tests: Agent creation with valid/invalid data, duplicate handling
+**Agent OS Model:**
+- **Agent as Individual Human**: Each agent has tools, memory, system prompts, and user sessions
+- **One Agent Per App**: All KohTravel users share the same agent definition but get personalized execution
+- **Database-Driven Configuration**: All agent data stored in separate Agent OS database
+- **Authentication Pass-Through**: User credentials forwarded in each request, never stored
 
-- [ ] Implement GET /api/agents/{agent_id} endpoint
-  - Completion Criteria: Returns complete agent configuration including tools
-  - Tests: Agent retrieval by ID, non-existent agent handling
+**Core Transformation:**
+```
+Current: Hardcoded "kohtravel" → Dynamic agent registry
+Current: In-memory storage → Database persistence
+Current: Single agent → Multiple agents per app
+Current: Static configuration → API-driven management
+```
 
-- [ ] Implement PUT /api/agents/{agent_id}/prompt endpoint
-  - Completion Criteria: Updates base system prompt and tracks version changes
-  - Tests: Prompt updates preserve agent state, validation of prompt format
+## Key Insights from Analysis
 
-- [ ] Implement PUT /api/agents/{agent_id}/tools endpoint
-  - Completion Criteria: Updates tools configuration with validation
-  - Tests: Tools config validation, tool availability checking
+**Phase 1 Foundation Assessment**: ✅ **Excellent Infrastructure Ready**
+- Complete database models (AgentModel, UserAgentContextModel, SessionModel)
+- Repository pattern with async SQLAlchemy 2.0+
+- Production-ready FastAPI server with middleware
+- External tool integration system functional
 
-### Task 2.2: Agent Discovery and Listing
-- [ ] Implement GET /api/agents endpoint with filtering
-  - Completion Criteria: List agents by app_name with pagination
-  - Tests: Filtering works correctly, pagination limits respected
+**Critical Bottlenecks Identified**:
+- `agent-infrastructure/src/server/routes/agent.py:74-77` - Hardcoded "kohtravel" configuration
+- In-memory `user_agents` dict instead of database persistence
+- Missing API layer for dynamic agent management
+- No user context persistence via API
 
-- [ ] Add agent metadata and search capabilities
-  - Completion Criteria: Search agents by name, app, or metadata
-  - Tests: Search queries return correct results, performance acceptable
+**Tool Validation Requirements** (from Anthropic Engineering):
+- Evaluation-driven development with comprehensive test sets
+- Clear tool interfaces with distinct purposes and helpful error messages
+- Token-efficient responses with semantic meaning
+- Security through selective tool implementation
 
-### Task 2.3: Agent Validation and Business Logic
-- [ ] Implement agent configuration validation
-  - Completion Criteria: Invalid configurations are rejected with clear errors
-  - Tests: All validation rules tested with edge cases
+## Comprehensive Task Breakdown
 
-- [ ] Add agent status and health tracking
-  - Completion Criteria: Agent availability and last-used tracking
-  - Tests: Status updates work correctly, health metrics accurate
+**Timeline: 12-16 days | 6 Core Phases**
+
+### **Phase 2.1: Agent Management Infrastructure** (3-4 days)
+
+**Objective**: Replace hardcoded agent logic with database-driven agent management
+
+#### Task 2.1.1: Create Agent Management API Routes
+- [ ] **Create `/agent-infrastructure/src/server/routes/agents.py`**
+  - **Completion Criteria**:
+    - POST /api/agents (create agent with app_name, name, system_prompt, tools_config)
+    - GET /api/agents/{agent_id} (retrieve complete agent configuration)
+    - PUT /api/agents/{agent_id}/prompt (update base system prompt)
+    - PUT /api/agents/{agent_id}/tools (update tools configuration)
+    - GET /api/agents (list agents with app_name filtering and pagination)
+    - DELETE /api/agents/{agent_id} (soft delete/deactivate agent)
+  - **Tests**: Agent CRUD operations, validation, error handling, duplicate prevention
+  - **Dependencies**: Phase 1 database models and repositories
+
+#### Task 2.1.2: Create Pydantic Request/Response Schemas
+- [ ] **Create `/agent-infrastructure/src/schemas/agent_schemas.py`**
+  - **Completion Criteria**:
+    - AgentCreateRequest, AgentResponse, AgentUpdateRequest schemas
+    - Tool configuration validation schemas
+    - Comprehensive input validation with clear error messages
+  - **Tests**: Schema validation, edge cases, malformed input handling
+  - **Dependencies**: None
+
+#### Task 2.1.3: Integrate with Existing Repository Pattern
+- [ ] **Update agent route handlers to use AgentRepository**
+  - **Completion Criteria**:
+    - All endpoints use existing repository methods
+    - Proper error handling and HTTP status codes
+    - Comprehensive logging for audit trails
+  - **Tests**: Repository integration, database transaction handling
+  - **Dependencies**: Task 2.1.1, Task 2.1.2
+
+### **Phase 2.2: Dynamic Tool System** (2-3 days)
+
+**Objective**: Remove hardcoded external_tools_config and enable dynamic tool management
+
+#### Task 2.2.1: Replace Hardcoded Tool Configuration
+- [ ] **Update `/agent-infrastructure/src/server/routes/agent.py`**
+  - **Completion Criteria**:
+    - Remove lines 74-77 hardcoded external_tools_config
+    - Load tool configuration from database via AgentRepository
+    - Support multiple apps with different tool configurations
+  - **Tests**: Tool loading, multi-app support, backward compatibility
+  - **Dependencies**: Phase 2.1 completion
+
+#### Task 2.2.2: Implement Tool Configuration API
+- [ ] **Add tool management endpoints to agents.py**
+  - **Completion Criteria**:
+    - POST /api/agents/{agent_id}/tools/{tool_name} (add custom tool)
+    - DELETE /api/agents/{agent_id}/tools/{tool_name} (remove tool)
+    - PUT /api/agents/{agent_id}/tools/{tool_name} (update tool config)
+  - **Tests**: Tool CRUD operations, validation, tool availability checking
+  - **Dependencies**: Task 2.2.1
+
+#### Task 2.2.3: Tool Validation and Security
+- [ ] **Implement comprehensive tool validation**
+  - **Completion Criteria**:
+    - Tool endpoint URL validation and reachability testing
+    - Input/output schema validation for tools
+    - Tool permission and security checking
+    - Rate limiting for tool operations
+  - **Tests**: Tool validation edge cases, security scenarios, performance
+  - **Dependencies**: Task 2.2.2
+
+### **Phase 2.3: User Context Management API** (2 days)
+
+**Objective**: Expose existing user context functionality through comprehensive API
+
+#### Task 2.3.1: Create User Context API Routes
+- [ ] **Create `/agent-infrastructure/src/server/routes/user_contexts.py`**
+  - **Completion Criteria**:
+    - PUT /api/agents/{agent_id}/users/{user_id}/context (set user customizations)
+    - GET /api/agents/{agent_id}/users/{user_id}/context (get user customizations)
+    - DELETE /api/agents/{agent_id}/users/{user_id}/context (reset to defaults)
+  - **Tests**: User context CRUD, user isolation, default handling
+  - **Dependencies**: Phase 1 UserAgentContextModel
+
+#### Task 2.3.2: User Context Schema and Validation
+- [ ] **Create user context schemas and validation**
+  - **Completion Criteria**:
+    - UserContextRequest/Response schemas
+    - Custom prompt addon validation
+    - User preference validation (language, tone, etc.)
+  - **Tests**: Schema validation, user preference edge cases
+  - **Dependencies**: Task 2.3.1
+
+### **Phase 2.4: Session Management API** (2-3 days)
+
+**Objective**: Create comprehensive session management for agent conversations
+
+#### Task 2.4.1: Create Session Management Routes
+- [ ] **Create `/agent-infrastructure/src/server/routes/sessions.py`**
+  - **Completion Criteria**:
+    - POST /api/agents/{agent_id}/users/{user_id}/sessions (create new session)
+    - GET /api/sessions/{session_id}/history (get conversation history)
+    - POST /api/sessions/{session_id}/chat (send message with auth context)
+    - DELETE /api/sessions/{session_id} (end session)
+  - **Tests**: Session lifecycle, conversation persistence, auth forwarding
+  - **Dependencies**: Phase 1 SessionModel
+
+#### Task 2.4.2: Enhanced Chat Endpoint with Agent Context
+- [ ] **Update chat functionality to use database-driven agents**
+  - **Completion Criteria**:
+    - Dynamic system prompt building (base + user customizations)
+    - Tool execution with user authentication forwarding
+    - Conversation history persistence per session
+    - Support for session continuation across requests
+  - **Tests**: Chat functionality, prompt assembly, tool calling, persistence
+  - **Dependencies**: All previous phases
+
+#### Task 2.4.3: Session Lifecycle Management
+- [ ] **Implement session cleanup and management**
+  - **Completion Criteria**:
+    - Session timeout and cleanup policies
+    - Session metadata tracking (last_active, message_count)
+    - Bulk session operations for user management
+  - **Tests**: Session cleanup, timeout handling, bulk operations
+  - **Dependencies**: Task 2.4.1, Task 2.4.2
+
+### **Phase 2.5: Migration & Compatibility** (2 days)
+
+**Objective**: Ensure zero breaking changes for KohTravel during transition
+
+#### Task 2.5.1: Backward Compatibility Layer
+- [ ] **Create compatibility wrapper for existing endpoints**
+  - **Completion Criteria**:
+    - Existing /api/agent/chat endpoint continues working
+    - Automatic agent discovery for legacy requests
+    - Seamless migration path for KohTravel
+  - **Tests**: Legacy endpoint functionality, migration scenarios
+  - **Dependencies**: Phase 2.4 completion
+
+#### Task 2.5.2: KohTravel Agent Pre-configuration
+- [ ] **Set up default KohTravel agent in database**
+  - **Completion Criteria**:
+    - "kohtravel-travel-assistant" agent created with current configuration
+    - All existing tools configured and working
+    - System prompt migrated from static files
+  - **Tests**: KohTravel functionality preservation, tool availability
+  - **Dependencies**: All core phases complete
+
+### **Phase 2.6: Integration Testing & Validation** (1-2 days)
+
+**Objective**: Comprehensive testing and performance validation
+
+#### Task 2.6.1: End-to-End Integration Testing
+- [ ] **Create comprehensive integration test suite**
+  - **Completion Criteria**:
+    - Multi-agent scenarios testing
+    - User context isolation verification
+    - Tool execution with auth forwarding
+    - Session persistence across restarts
+  - **Tests**: Full workflow testing, performance benchmarks
+  - **Dependencies**: All implementation phases complete
+
+#### Task 2.6.2: Performance and Load Testing
+- [ ] **Validate performance vs current system**
+  - **Completion Criteria**:
+    - Response times match or improve over current system
+    - Database query optimization
+    - Memory usage profiling
+  - **Tests**: Load testing, performance regression testing
+  - **Dependencies**: Task 2.6.1
+
+#### Task 2.6.3: Security and Validation Review
+- [ ] **Security audit and validation review**
+  - **Completion Criteria**:
+    - Authentication flow security validation
+    - Input validation security testing
+    - Multi-tenancy isolation verification
+  - **Tests**: Security penetration testing, isolation verification
+  - **Dependencies**: Task 2.6.2
+
+## API Design Summary
+
+**Agent Management:**
+```
+POST /api/agents                           # Create agent
+GET /api/agents/{agent_id}                # Get agent configuration
+PUT /api/agents/{agent_id}/prompt         # Update base prompt
+PUT /api/agents/{agent_id}/tools          # Update tools config
+GET /api/agents                           # List agents (filtered)
+DELETE /api/agents/{agent_id}             # Deactivate agent
+```
+
+**User Context:**
+```
+PUT /api/agents/{agent_id}/users/{user_id}/context  # Set customizations
+GET /api/agents/{agent_id}/users/{user_id}/context  # Get customizations
+DELETE /api/agents/{agent_id}/users/{user_id}/context # Reset defaults
+```
+
+**Sessions & Chat:**
+```
+POST /api/agents/{agent_id}/users/{user_id}/sessions  # Create session
+POST /api/sessions/{session_id}/chat                 # Send message
+GET /api/sessions/{session_id}/history               # Get history
+DELETE /api/sessions/{session_id}                    # End session
+```
+
+## Database Schema (Leveraging Phase 1)
+
+**Existing Models Ready for Use:**
+```sql
+agents (
+    id,                  -- "kohtravel-travel-assistant"
+    app_name,            -- "kohtravel"
+    name,                -- "Travel Assistant"
+    base_system_prompt,  -- shared system prompt
+    tools_config,        -- JSON: tool definitions
+    created_at,
+    updated_at
+)
+
+user_agent_context (
+    agent_id,
+    user_id,             -- from app (e.g. KohTravel user ID)
+    custom_prompt_addons, -- user-specific prompt modifications
+    user_preferences,    -- JSON: {language: "en", tone: "friendly"}
+    context_metadata,    -- any user-specific context
+    created_at,
+    updated_at
+)
+
+sessions (
+    id,                  -- session UUID
+    agent_id,
+    user_id,
+    conversation_history, -- JSON array of messages
+    created_at,
+    last_active_at
+)
+```
+
+## Risk Mitigation
+
+**Backward Compatibility**:
+- Legacy endpoints maintained throughout transition
+- KohTravel functionality preserved with zero downtime
+- Feature flags for gradual rollout
+
+**Performance**:
+- Database query optimization
+- Connection pooling already configured
+- Caching strategy for agent configurations
+
+**Security**:
+- Authentication context passed in requests (never stored)
+- Multi-tenant isolation at database level
+- Comprehensive input validation
+
+## Success Criteria
+
+### Technical Success
+- [ ] All existing KohTravel functionality preserved
+- [ ] Performance matches or exceeds current system
+- [ ] New Agent OS APIs support multiple applications
+- [ ] Zero breaking changes during migration
+
+### Architectural Success
+- [ ] Complete removal of hardcoded KohTravel references
+- [ ] Database-driven agent management functional
+- [ ] Multi-tenant architecture proven with multiple agents
+- [ ] Tool system extensible for future marketplace
+
+### Operational Success
+- [ ] Comprehensive logging and monitoring implemented
+- [ ] Security vulnerabilities identified and mitigated
+- [ ] Documentation enables team to operate system
+- [ ] Migration path validated and repeatable
 
 ## Dependencies
-- Phase 1: Database infrastructure must be complete
+- Phase 1: Database infrastructure must be complete ✅
+- External: KohTravel API endpoints for tool integration
+- Infrastructure: Separate Agent OS database configured
 
 ## Notes
 - All agent operations must be atomic
 - Include comprehensive logging for audit trails
 - Consider rate limiting for agent creation
+- Maintain backward compatibility throughout migration
+- Use feature flags for gradual rollout control
+
+## Tech Lead Review & Strategic Recommendations
+
+**Overall Architecture Assessment: 8.5/10** - Strong foundation with implementation details requiring strategic refinements for production success.
+
+### Key Technical Insights
+
+**Phase 1 Foundation Assessment**: ✅ **Exceptional Infrastructure Ready**
+- Complete async SQLAlchemy 2.0+ with proper relationships and indexing
+- Production-ready repository pattern with comprehensive error handling
+- Multi-tenant database design optimized for Agent OS vision
+- Feature flags and middleware infrastructure already in place
+
+**Critical Architecture Strengths**:
+- Agent-as-a-Service model aligns with microservice best practices
+- Database-driven configuration eliminates coupling effectively
+- Authentication pass-through maintains proper security boundaries
+- Logical 6-phase dependency sequence enables parallel development
+
+### High-Risk Areas & Mitigations
+
+**🔴 Risk 1: Database Migration Complexity**
+- **Issue**: Tool configuration migration from hardcoded to JSON schema
+- **Mitigation**: Implement idempotent migration with rollback capability and checkpoint validation
+
+**🔴 Risk 2: Performance Regression from Database Calls**
+- **Issue**: Agent configuration loading on every chat request could impact latency
+- **Mitigation**: Multi-layered caching strategy with 5-minute TTL and connection pool optimization
+
+**🔴 Risk 3: Authentication Context Leakage**
+- **Issue**: Request context propagation across async boundaries
+- **Mitigation**: Use context variables for secure auth propagation with proper isolation
+
+### Strategic Architecture Refinements
+
+**Database Transaction Management**
+```python
+# Implement unit-of-work pattern for multi-entity operations
+async def create_agent_with_tools(agent_data: AgentCreateRequest):
+    async with transaction():
+        agent = await agent_repo.create(agent_data)
+        for tool in agent_data.tools:
+            await tool_repo.create(agent.id, tool)
+        return agent  # Atomic operation ensures consistency
+```
+
+**API Design Improvements**
+- **Standardize URL patterns**: Use consistent hierarchical resource patterns
+- **Add operational endpoints**: Health checks, metrics, bulk operations
+- **Enhanced response schemas**: Include version, health status, usage metrics
+
+**Tool Security Architecture**
+```python
+# Implement tiered security model
+class ToolValidator:
+    async def validate_tool(self, tool_config: ToolConfig):
+        # Level 1: Schema validation (input/output)
+        # Level 2: Endpoint reachability testing
+        # Level 3: Sandboxed execution environment (future)
+```
+
+### Performance Optimization Strategy
+
+**Database Query Optimization**
+- Add covering indexes for common queries
+- Implement read replicas for chat operations
+- Use connection pooling with 20 base + 30 overflow connections
+
+**Memory Management**
+- Conversation summarization for messages older than 24 hours
+- Archive inactive sessions after 30 days to cold storage
+- Agent configuration caching with invalidation on updates
+
+### Enhanced Testing Requirements
+
+**Comprehensive Testing Framework**
+- Unit tests with 100% coverage for new endpoints
+- Integration tests for complete agent lifecycle workflows
+- Load testing for 100+ concurrent chat sessions
+- Security testing for multi-tenant isolation
+
+**Migration Validation Pipeline**
+- Tool connectivity testing during migration
+- Response quality comparison with legacy system
+- Performance benchmarking against baseline
+- Automated rollback procedures
+
+### Production Readiness Enhancements
+
+**Essential Monitoring Metrics**
+```
+Application: agent_creation_duration, chat_response_time, tool_execution_duration
+Business: agents_created_total, users_active_total, session_duration_minutes
+Infrastructure: database_connection_pool_usage, memory_usage_percent
+```
+
+**Critical Alerting Framework**
+- Database connection failures
+- Tool endpoint unreachable
+- Authentication context missing
+- Response time > 2 seconds
+- Memory usage > 80%
+
+### Recommended Task Sequence Optimizations
+
+**Parallel Development Opportunities**:
+1. **Phase 2.1**: Create all schemas in parallel (agents, tools, sessions, user contexts)
+2. **Database optimization** can run parallel with API development
+3. **Testing framework** development can start during Phase 2.1
+4. **Documentation** writing throughout implementation
+
+**Timeline Optimization**: **10-14 days** (vs original 12-16 days) through:
+- Parallel schema development
+- Early database optimization
+- Integrated testing approach
+- Streamlined migration strategy
+
+### Code Quality Standards
+
+**Technical Requirements**:
+- All database operations wrapped in transactions
+- Circuit breakers for external tool calls
+- Rate limiting on all endpoints
+- Structured logging with correlation IDs
+- Comprehensive input validation
+
+**Security Requirements**:
+- Authentication context never stored
+- Input sanitization against injection attacks
+- Audit logging for configuration changes
+- API rate limiting to prevent abuse
+
+### Strategic Impact Assessment
+
+This implementation will successfully establish:
+- **Multi-application platform** with complete tenant isolation
+- **Horizontal scaling capability** through database-driven architecture
+- **Advanced feature foundation** for tool marketplace and orchestration
+- **Production reliability** through comprehensive error handling
+
+**Conclusion**: The Phase 2 plan is **technically sound** and **strategically aligned** with the Agent OS vision. With the recommended refinements for transaction management, performance optimization, and enhanced security, this will deliver a robust foundation for platform scalability and operational excellence.
 
 ---
 

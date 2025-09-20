@@ -111,3 +111,17 @@ This approach works for any document type without code changes.
 - All KohTravel logic stays in KohTravel API service
 - Document processing is async with status tracking
 - Frontend routes through KohTravel API, not directly to agent infrastructure
+
+## LLM Context and Documentation
+
+### info_for_llms Folders
+Throughout the codebase, you'll find folders named `info_for_llms/` containing detailed documentation and context for AI assistants. **Before taking action on unfamiliar code or when encountering issues, always check for nearby `info_for_llms/` folders first.**
+
+These folders contain:
+- Architecture explanations
+- Implementation details
+- Common patterns and conventions
+- Troubleshooting guidance
+- Design decisions and rationale
+
+**Search pattern**: Look for `info_for_llms/` folders in the current directory and parent directories when you need additional context about code behavior, patterns, or architecture.

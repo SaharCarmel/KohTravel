@@ -2,8 +2,10 @@
 Database connection and session management for Agent OS
 """
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import NullPool
+from sqlalchemy import text
 from typing import AsyncGenerator, Optional
+from contextlib import asynccontextmanager
 import structlog
 from src.config.settings import get_settings
 
@@ -43,13 +45,11 @@ class DatabaseManager:
             return
 
         try:
+            # For async engines, use NullPool and avoid pool configuration parameters
+            # NullPool doesn't support pool_size, max_overflow, etc.
             self._engine = create_async_engine(
                 settings.agent_os_database_url,
-                pool_size=settings.agent_os_pool_size,
-                max_overflow=settings.agent_os_max_overflow,
-                pool_timeout=settings.agent_os_pool_timeout,
-                pool_recycle=settings.agent_os_pool_recycle,
-                poolclass=QueuePool,
+                poolclass=NullPool,  # Use NullPool for async engines
                 echo=settings.debug,
                 echo_pool=settings.debug,
             )
@@ -63,16 +63,16 @@ class DatabaseManager:
             self._initialized = True
             logger.info(
                 "Agent OS database initialized successfully",
-                pool_size=settings.agent_os_pool_size,
-                max_overflow=settings.agent_os_max_overflow,
-                pool_timeout=settings.agent_os_pool_timeout,
-                pool_recycle=settings.agent_os_pool_recycle
+                poolclass="NullPool",
+                async_engine=True,
+                database_url_configured=bool(settings.agent_os_database_url)
             )
 
         except Exception as e:
             logger.error("Failed to initialize Agent OS database", error=str(e))
             raise
 
+    @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
         """Get database session with proper cleanup"""
         if not self._initialized or not self._session_maker:
@@ -94,9 +94,10 @@ class DatabaseManager:
 
         try:
             async with self._engine.begin() as conn:
-                await conn.execute("SELECT 1")
+                await conn.execute(text("SELECT 1"))
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("Database health check failed", error=str(e))
             return False
 
     @property
@@ -134,7 +135,7 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     Yields:
         AsyncSession: Database session with automatic cleanup
     """
-    async for session in db_manager.get_session():
+    async with db_manager.get_session() as session:
         yield session
 
 

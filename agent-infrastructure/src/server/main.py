@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.server.routes.agent import router as agent_router
+from src.server.routes.agents import router as agents_router
 from src.server.routes.health import router as health_router
 from src.server.routes.init import router as init_router
 from src.server.routes.cleanup import router as cleanup_router
@@ -40,17 +41,18 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting agent infrastructure server", version="0.1.0")
 
-    # Initialize Agent OS database if enabled
+    # Initialize Agent OS database (required for operation)
     try:
         await ensure_database_initialized()
         if settings.agent_os_enabled:
             logger.info("Agent OS database initialized successfully")
         else:
-            logger.info("Agent OS database disabled, using in-memory storage")
+            logger.error("Agent OS database is disabled but required for operation")
+            raise RuntimeError("Agent OS database must be enabled for operation")
     except Exception as e:
         logger.error("Failed to initialize Agent OS database", error=str(e))
-        if settings.agent_os_enabled:
-            logger.warning("Agent OS database initialization failed, falling back to in-memory storage")
+        logger.error("Database is required for operation - cannot start without database connectivity")
+        raise RuntimeError(f"Database initialization failed: {e}") from e
 
     # Store settings in app state
     app_state["settings"] = settings
@@ -99,8 +101,9 @@ def create_app() -> FastAPI:
     
     # Include routers
     app.include_router(health_router, prefix="/health", tags=["health"])
+    app.include_router(agents_router, tags=["Agent Management"])  # New Agent Management API
     app.include_router(init_router, prefix="/api/agent", tags=["agent-init"])
-    app.include_router(agent_router, prefix="/api/agent", tags=["agent"])
+    app.include_router(agent_router, prefix="/api/agent", tags=["agent"])  # Legacy agent endpoints
     app.include_router(cleanup_router, prefix="/api/agent", tags=["agent-cleanup"])
     
     return app
@@ -109,7 +112,7 @@ def create_app() -> FastAPI:
 def run_server(host: str = "0.0.0.0", port: int = 8001, reload: bool = False):
     """Run the agent server"""
     uvicorn.run(
-        "agent_infrastructure.server.main:create_app",
+        "src.server.main:create_app",
         factory=True,
         host=host,
         port=port,

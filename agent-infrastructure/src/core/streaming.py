@@ -3,7 +3,7 @@ Streaming response handling for real-time agent communication
 """
 from typing import Any, Dict, Optional, AsyncGenerator
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 
@@ -15,7 +15,7 @@ class StreamingResponse(BaseModel):
     
     def __init__(self, **data):
         if data.get('timestamp') is None:
-            data['timestamp'] = datetime.utcnow()
+            data['timestamp'] = datetime.now(timezone.utc)
         super().__init__(**data)
     
     def to_sse_event(self, event: str = "message") -> str:
