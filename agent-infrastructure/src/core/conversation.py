@@ -1,7 +1,7 @@
 """
 Conversation management for agent interactions
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel
@@ -29,7 +29,7 @@ class Message(BaseModel):
         if data.get('id') is None:
             data['id'] = str(uuid.uuid4())
         if data.get('timestamp') is None:
-            data['timestamp'] = datetime.utcnow()
+            data['timestamp'] = datetime.now(timezone.utc)
         super().__init__(**data)
 
 
@@ -44,15 +44,15 @@ class Conversation(BaseModel):
     
     def __init__(self, **data):
         if data.get('created_at') is None:
-            data['created_at'] = datetime.utcnow()
+            data['created_at'] = datetime.now(timezone.utc)
         if data.get('updated_at') is None:
-            data['updated_at'] = datetime.utcnow()
+            data['updated_at'] = datetime.now(timezone.utc)
         super().__init__(**data)
     
     def add_message(self, message: Message) -> None:
         """Add a message to the conversation"""
         self.messages.append(message)
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
     
     def get_recent_messages(self, limit: int = 10) -> List[Message]:
         """Get recent messages from conversation"""
@@ -65,7 +65,7 @@ class Conversation(BaseModel):
     def clear_messages(self) -> None:
         """Clear all messages from conversation"""
         self.messages = []
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
     
     def get_context_summary(self, max_messages: int = 20) -> str:
         """Get a summary of recent conversation context"""

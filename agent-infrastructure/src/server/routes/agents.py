@@ -15,7 +15,7 @@ Key Features:
 """
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import asyncio
 from contextlib import asynccontextmanager
@@ -123,19 +123,19 @@ async def validate_tools_connectivity(
                 is_valid=True,
                 connectivity_check=True,
                 schema_validation=True,
-                last_checked_at=datetime.utcnow()
+                last_checked_at=datetime.now(timezone.utc)
             ))
             continue
 
         # Validate external tool connectivity
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         endpoint_url = tool.get("endpoint_url")
 
         try:
             # TODO: Implement actual HTTP connectivity check
             # For now, assume valid if URL is provided
             is_connected = bool(endpoint_url)
-            response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            response_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             results.append(ToolValidationResult(
                 tool_name=tool["name"],
@@ -143,7 +143,7 @@ async def validate_tools_connectivity(
                 connectivity_check=is_connected,
                 schema_validation=True,  # TODO: Implement schema validation
                 response_time_ms=response_time,
-                last_checked_at=datetime.utcnow()
+                last_checked_at=datetime.now(timezone.utc)
             ))
 
         except Exception as e:
@@ -160,7 +160,7 @@ async def validate_tools_connectivity(
                 connectivity_check=False,
                 schema_validation=False,
                 error_message=str(e),
-                last_checked_at=datetime.utcnow()
+                last_checked_at=datetime.now(timezone.utc)
             ))
 
     return results
@@ -169,8 +169,9 @@ async def validate_tools_connectivity(
 def calculate_agent_metrics(agent: AgentModel) -> UsageMetrics:
     """Calculate usage metrics for an agent"""
     # TODO: Implement actual metrics calculation from sessions
+    # For now, return default metrics to avoid lazy loading issues
     return UsageMetrics(
-        total_sessions=len(agent.sessions) if agent.sessions else 0,
+        total_sessions=0,  # TODO: Query sessions separately to avoid lazy loading
         active_sessions=0,  # TODO: Count active sessions
         total_messages=0,   # TODO: Count from conversation history
         total_tool_calls=0, # TODO: Count from conversation history
@@ -254,7 +255,7 @@ async def create_agent(
         correlation_id=correlation_id
     )
 
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
 
     try:
         async with transaction_context(session, correlation_id):
@@ -313,7 +314,7 @@ async def create_agent(
                 description=agent_data.description
             )
 
-            duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             logger.info(
                 "Agent created successfully",
@@ -751,5 +752,5 @@ async def check_agent_health(
         unhealthy_tools=total_tools - healthy_tools,
         tool_results=tool_results,
         overall_health=overall_health,
-        last_checked_at=datetime.utcnow()
+        last_checked_at=datetime.now(timezone.utc)
     )

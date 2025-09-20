@@ -13,7 +13,7 @@ Key Features:
 """
 
 from typing import Dict, Any, List, Optional, Union
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pydantic import BaseModel, Field, validator, root_validator
 import re

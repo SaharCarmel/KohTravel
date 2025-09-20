@@ -9,9 +9,11 @@ import structlog
 
 from src.core.agent import Agent, AgentConfig
 from src.core.streaming import StreamingManager
+from src.core.tool_registry import tool_registry
 from src.providers.anthropic_provider import AnthropicProvider, AnthropicConfig
 from src.tools.file_ops import ReadFileTool, WriteFileTool, ListDirectoryTool
-from src.tools.external import external_registry
+from src.tools.external import external_registry, ExternalTool
+from src.schemas.tool_schemas import ToolDefinition, ToolType, ToolHealthStatus
 from src.config.settings import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -19,8 +21,66 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 # User-scoped agent instances for multi-user support
-# Key format: "{project}:{user_id}" 
+# Key format: "{project}:{user_id}"
 user_agents: Dict[str, Agent] = {}
+
+
+async def _create_external_tool_from_definition(tool_def: ToolDefinition) -> Optional[ExternalTool]:
+    """
+    Convert a ToolDefinition to an ExternalTool object for agent registration.
+
+    This helper function bridges the new dynamic tool system with the existing
+    ExternalTool implementation for backward compatibility.
+    """
+    try:
+        # Build parameters schema from tool definition
+        parameters_schema = {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+
+        if tool_def.input_schema and tool_def.input_schema.properties:
+            for param_name, param_def in tool_def.input_schema.properties.items():
+                parameters_schema["properties"][param_name] = {
+                    "type": param_def.type,
+                    "description": param_def.description
+                }
+
+                if param_def.required:
+                    parameters_schema["required"].append(param_name)
+
+                if param_def.default is not None:
+                    parameters_schema["properties"][param_name]["default"] = param_def.default
+
+                if param_def.enum:
+                    parameters_schema["properties"][param_name]["enum"] = param_def.enum
+
+        # Create ExternalTool instance
+        external_tool = ExternalTool(
+            name=tool_def.name,
+            description=tool_def.description,
+            endpoint_url=tool_def.endpoint_url,
+            parameters_schema=parameters_schema,
+            timeout=tool_def.security_policy.timeout_seconds if tool_def.security_policy else 30
+        )
+
+        logger.debug(
+            "Created ExternalTool from ToolDefinition",
+            tool_name=tool_def.name,
+            endpoint_url=tool_def.endpoint_url,
+            param_count=len(parameters_schema.get("properties", {}))
+        )
+
+        return external_tool
+
+    except Exception as e:
+        logger.error(
+            "Failed to create ExternalTool from ToolDefinition",
+            tool_name=tool_def.name,
+            error=str(e)
+        )
+        return None
 
 
 class ChatMessage(BaseModel):
@@ -51,9 +111,7 @@ async def get_or_create_agent(project: str, user_id: str, system_prompt: Optiona
 
     # If system_prompt is provided, always create fresh agent (for prompt updates)
     if system_prompt is not None and agent_key in user_agents:
-        logger.info("Recreating agent with new system prompt",
-                   project=project, user_id=user_id,
-                   prompt_length=len(system_prompt))
+        logger.info("Recreating agent with new system prompt", project=project, user_id=user_id)
         del user_agents[agent_key]  # Clear cached agent
 
     if agent_key in user_agents:
@@ -100,9 +158,6 @@ async def get_or_create_agent(project: str, user_id: str, system_prompt: Optiona
     )
     provider = AnthropicProvider(provider_config)
 
-    # Load external tools for project
-    project_tools = []
-
     # Determine system prompt: use provided, then database, then default
     final_system_prompt = system_prompt
     if final_system_prompt is None and agent_model:
@@ -110,38 +165,63 @@ async def get_or_create_agent(project: str, user_id: str, system_prompt: Optiona
     if final_system_prompt is None:
         final_system_prompt = "You are a helpful AI assistant."
 
-    # Load project-specific tools from agent configuration or fallback to legacy
-    if agent_model and agent_model.tools_config:
-        # Load tools from database configuration
-        for tool_name, tool_config in agent_model.tools_config.items():
-            if tool_name in (agent_model.enabled_tools or []):
-                tool_type = tool_config.get("type", "external")
-                if tool_type == "external" and tool_config.get("endpoint_url"):
-                    try:
-                        external_tools = await external_registry.load_tools_from_endpoint(
-                            tool_config["endpoint_url"]
-                        )
-                        project_tools.extend(external_tools)
-                        logger.info(
-                            "Loaded external tools from database config",
-                            project=project,
-                            tool_name=tool_name,
-                            endpoint=tool_config["endpoint_url"],
-                            count=len(external_tools)
-                        )
-                    except Exception as e:
+    # Enhanced tool loading with dynamic registry and health validation
+    project_tools = []
+    validated_tools = []
+
+    # Initialize tool registry with database session
+    try:
+        if settings.agent_os_enabled:
+            async with db_manager.get_session() as session:
+                await tool_registry.initialize(session)
+    except Exception as e:
+        logger.warning("Failed to initialize tool registry with database", error=str(e))
+
+    # Load tools using dynamic tool registry (hybrid approach)
+    if agent_model:
+        try:
+            # Load tools from dynamic registry for this agent
+            tool_definitions = await tool_registry.get_agent_tools(agent_model.id)
+
+            if tool_definitions:
+                # Convert ToolDefinitions to ExternalTool objects and validate health
+                for tool_def in tool_definitions:
+                    # Validate tool health before including
+                    if await tool_registry.validate_tool_health(tool_def):
+                        if tool_def.type == ToolType.EXTERNAL and tool_def.endpoint_url:
+                            # Create ExternalTool from ToolDefinition
+                            external_tool = await _create_external_tool_from_definition(tool_def)
+                            if external_tool:
+                                project_tools.append(external_tool)
+                                validated_tools.append(tool_def.name)
+                        elif tool_def.type in [ToolType.INTERNAL, ToolType.BUILTIN]:
+                            # Handle internal tools (placeholder for future implementation)
+                            pass
+                            validated_tools.append(tool_def.name)
+                    else:
                         logger.warning(
-                            "Failed to load external tool from database config",
-                            project=project,
-                            tool_name=tool_name,
-                            error=str(e)
+                            "Tool failed health validation, skipping",
+                            tool_name=tool_def.name,
+                            health_status=await tool_registry.get_tool_health_status(tool_def.name)
                         )
-    else:
-        # Fallback to legacy configuration for backward compatibility
+
+
+            else:
+                pass  # No dynamic tools found
+
+        except Exception as e:
+            logger.warning(
+                "Failed to load tools from dynamic registry, falling back to legacy",
+                project=project,
+                error=str(e)
+            )
+
+    # Fallback to legacy configuration if no dynamic tools or if agent_model is None
+    if not project_tools:
         logger.info(
             "Using legacy tool configuration",
             project=project,
-            reason="agent_os_disabled" if not settings.agent_os_enabled else "no_agent_found"
+            reason="agent_os_disabled" if not settings.agent_os_enabled else "no_dynamic_tools_found"
         )
 
         # Legacy hardcoded configuration (will be removed in Phase 2.5)
@@ -158,7 +238,6 @@ async def get_or_create_agent(project: str, user_id: str, system_prompt: Optiona
             try:
                 external_tools = await external_registry.load_tools_from_endpoint(tools_base_url)
                 project_tools.extend(external_tools)
-                logger.info("Loaded external tools (legacy)", project=project, count=len(external_tools))
             except Exception as e:
                 logger.warning("Failed to load external tools (legacy)", project=project, error=str(e))
 
@@ -195,8 +274,15 @@ async def get_or_create_agent(project: str, user_id: str, system_prompt: Optiona
         agent.register_tool("list_directory", list_tool)
 
     user_agents[agent_key] = agent
-    logger.info("User agent created", project=project, user_id=user_id, agent_key=agent_key, tools=list(agent.tools.keys()))
-    
+
+    logger.info(
+        "User agent created",
+        project=project,
+        user_id=user_id,
+        tool_count=len(agent.tools),
+        agent_id=agent_model.id if agent_model else "legacy"
+    )
+
     return agent
 
 

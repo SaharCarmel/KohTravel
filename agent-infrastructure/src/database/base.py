@@ -4,7 +4,7 @@ SQLAlchemy Base Model with async support and naming conventions
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import MetaData, DateTime, func
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 

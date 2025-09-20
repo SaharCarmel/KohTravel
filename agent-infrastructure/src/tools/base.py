@@ -4,7 +4,7 @@ Base tool interface and common tool implementations
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -164,7 +164,7 @@ class Tool(ABC):
         """
         Execute tool with error handling and validation
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         
         try:
             # Validate parameters
@@ -174,7 +174,7 @@ class Tool(ABC):
             result = await self.execute(parameters, context)
             
             # Calculate execution time
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             result.execution_time = execution_time
             
             logger.info(
@@ -187,7 +187,7 @@ class Tool(ABC):
             return result
             
         except Exception as e:
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             error_result = ToolResult(
                 success=False,
                 content=f"Tool execution failed: {str(e)}",

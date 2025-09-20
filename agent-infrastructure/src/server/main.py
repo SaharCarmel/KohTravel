@@ -41,17 +41,18 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting agent infrastructure server", version="0.1.0")
 
-    # Initialize Agent OS database if enabled
+    # Initialize Agent OS database (required for operation)
     try:
         await ensure_database_initialized()
         if settings.agent_os_enabled:
             logger.info("Agent OS database initialized successfully")
         else:
-            logger.info("Agent OS database disabled, using in-memory storage")
+            logger.error("Agent OS database is disabled but required for operation")
+            raise RuntimeError("Agent OS database must be enabled for operation")
     except Exception as e:
         logger.error("Failed to initialize Agent OS database", error=str(e))
-        if settings.agent_os_enabled:
-            logger.warning("Agent OS database initialization failed, falling back to in-memory storage")
+        logger.error("Database is required for operation - cannot start without database connectivity")
+        raise RuntimeError(f"Database initialization failed: {e}") from e
 
     # Store settings in app state
     app_state["settings"] = settings
