@@ -38,83 +38,162 @@ class ChatResponse(BaseModel):
 
 
 async def get_or_create_agent(project: str, user_id: str, system_prompt: Optional[str] = None) -> Agent:
-    """Get or create user-scoped agent for project"""
+    """
+    Get or create user-scoped agent for project using database-driven configuration.
+
+    This function replaces the hardcoded agent creation logic with database-driven
+    agent management as recommended by the tech lead.
+    """
+    from src.database import get_async_session, db_manager
+    from src.repositories.agent_repository import AgentRepository
+
     agent_key = f"{project}:{user_id}"
-    
+
     # If system_prompt is provided, always create fresh agent (for prompt updates)
     if system_prompt is not None and agent_key in user_agents:
-        logger.info("Recreating agent with new system prompt", 
+        logger.info("Recreating agent with new system prompt",
                    project=project, user_id=user_id,
                    prompt_length=len(system_prompt))
         del user_agents[agent_key]  # Clear cached agent
-    
+
     if agent_key in user_agents:
         return user_agents[agent_key]
-    
+
     settings = get_settings()
-    
+
+    # Try to load agent from database if Agent OS is enabled
+    agent_model = None
+    if settings.agent_os_enabled:
+        try:
+            async with db_manager.get_session() as session:
+                repo = AgentRepository(session)
+
+                # Look for agent by app name (project)
+                agents = await repo.get_by_app(project, active_only=True)
+
+                if agents:
+                    # Use the first active agent for this app
+                    agent_model = agents[0]
+                    logger.info(
+                        "Found agent in database",
+                        project=project,
+                        agent_id=agent_model.id,
+                        tools_count=len(agent_model.enabled_tools or [])
+                    )
+                else:
+                    logger.warning(
+                        "No active agent found for project",
+                        project=project,
+                        user_id=user_id
+                    )
+        except Exception as e:
+            logger.warning(
+                "Failed to load agent from database, falling back to legacy mode",
+                project=project,
+                error=str(e)
+            )
+
     # Create provider
     provider_config = AnthropicConfig(
         api_key=settings.anthropic_api_key,
-        model=settings.default_model
+        model=agent_model.model if agent_model else settings.default_model
     )
     provider = AnthropicProvider(provider_config)
-    
+
     # Load external tools for project
     project_tools = []
-    
-    # Use provided system prompt or default
-    if system_prompt is None:
-        system_prompt = "You are a helpful AI assistant."
-    
-    # Load project-specific tools from external APIs if configured
-    import os
-    api_url = os.getenv('MAIN_API_URL', 'http://localhost:8000')
-    
-    external_tools_config = {
-        "kohtravel": f"{api_url}/api/agent/tools"
-        # Add other projects here as needed
-    }
-    
-    if project in external_tools_config:
-        tools_base_url = external_tools_config[project]
-        try:
-            external_tools = await external_registry.load_tools_from_endpoint(tools_base_url)
-            project_tools.extend(external_tools)
-            logger.info("Loaded external tools", project=project, count=len(external_tools))
-        except Exception as e:
-            logger.warning("Failed to load external tools", project=project, error=str(e))
-    
+
+    # Determine system prompt: use provided, then database, then default
+    final_system_prompt = system_prompt
+    if final_system_prompt is None and agent_model:
+        final_system_prompt = agent_model.base_system_prompt
+    if final_system_prompt is None:
+        final_system_prompt = "You are a helpful AI assistant."
+
+    # Load project-specific tools from agent configuration or fallback to legacy
+    if agent_model and agent_model.tools_config:
+        # Load tools from database configuration
+        for tool_name, tool_config in agent_model.tools_config.items():
+            if tool_name in (agent_model.enabled_tools or []):
+                tool_type = tool_config.get("type", "external")
+                if tool_type == "external" and tool_config.get("endpoint_url"):
+                    try:
+                        external_tools = await external_registry.load_tools_from_endpoint(
+                            tool_config["endpoint_url"]
+                        )
+                        project_tools.extend(external_tools)
+                        logger.info(
+                            "Loaded external tools from database config",
+                            project=project,
+                            tool_name=tool_name,
+                            endpoint=tool_config["endpoint_url"],
+                            count=len(external_tools)
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to load external tool from database config",
+                            project=project,
+                            tool_name=tool_name,
+                            error=str(e)
+                        )
+    else:
+        # Fallback to legacy configuration for backward compatibility
+        logger.info(
+            "Using legacy tool configuration",
+            project=project,
+            reason="agent_os_disabled" if not settings.agent_os_enabled else "no_agent_found"
+        )
+
+        # Legacy hardcoded configuration (will be removed in Phase 2.5)
+        import os
+        api_url = os.getenv('MAIN_API_URL', 'http://localhost:8000')
+
+        external_tools_config = {
+            "kohtravel": f"{api_url}/api/agent/tools"
+            # Add other projects here as needed
+        }
+
+        if project in external_tools_config:
+            tools_base_url = external_tools_config[project]
+            try:
+                external_tools = await external_registry.load_tools_from_endpoint(tools_base_url)
+                project_tools.extend(external_tools)
+                logger.info("Loaded external tools (legacy)", project=project, count=len(external_tools))
+            except Exception as e:
+                logger.warning("Failed to load external tools (legacy)", project=project, error=str(e))
+
     # Create agent config
     agent_config = AgentConfig(
         name=f"{project}-agent-{user_id}",
-        system_prompt=system_prompt,
-        model=settings.default_model,
-        enabled_tools=[tool.name for tool in project_tools] + ["read_file"]
+        system_prompt=final_system_prompt,
+        model=agent_model.model if agent_model else settings.default_model,
+        enabled_tools=[tool.name for tool in project_tools] + ["read_file"],
+        max_tokens=agent_model.max_tokens if agent_model else 4096,
+        temperature=agent_model.temperature if agent_model else 0.0
     )
-    
+
     # Create agent
     agent = Agent(
         config=agent_config,
         provider=provider,
         tools={}
     )
-    
+
     # Register external tools
     for tool in project_tools:
         agent.register_tool(tool.name, tool)
-    
+
     # Register standard file operation tools
     read_tool = ReadFileTool(allowed_paths=settings.allowed_file_paths)
     agent.register_tool("read_file", read_tool)
-    
+
     if settings.allow_file_write:
         write_tool = WriteFileTool(allowed_paths=settings.allowed_file_paths)
         agent.register_tool("write_file", write_tool)
-        
+
         list_tool = ListDirectoryTool(allowed_paths=settings.allowed_file_paths)
         agent.register_tool("list_directory", list_tool)
-    
+
     user_agents[agent_key] = agent
     logger.info("User agent created", project=project, user_id=user_id, agent_key=agent_key, tools=list(agent.tools.keys()))
     

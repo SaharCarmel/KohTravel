@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.server.routes.agent import router as agent_router
+from src.server.routes.agents import router as agents_router
 from src.server.routes.health import router as health_router
 from src.server.routes.init import router as init_router
 from src.server.routes.cleanup import router as cleanup_router
@@ -99,8 +100,9 @@ def create_app() -> FastAPI:
     
     # Include routers
     app.include_router(health_router, prefix="/health", tags=["health"])
+    app.include_router(agents_router, tags=["Agent Management"])  # New Agent Management API
     app.include_router(init_router, prefix="/api/agent", tags=["agent-init"])
-    app.include_router(agent_router, prefix="/api/agent", tags=["agent"])
+    app.include_router(agent_router, prefix="/api/agent", tags=["agent"])  # Legacy agent endpoints
     app.include_router(cleanup_router, prefix="/api/agent", tags=["agent-cleanup"])
     
     return app
@@ -109,7 +111,7 @@ def create_app() -> FastAPI:
 def run_server(host: str = "0.0.0.0", port: int = 8001, reload: bool = False):
     """Run the agent server"""
     uvicorn.run(
-        "agent_infrastructure.server.main:create_app",
+        "src.server.main:create_app",
         factory=True,
         host=host,
         port=port,
